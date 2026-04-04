@@ -1,0 +1,17 @@
+{
+  "provider": "openai_compat",
+  "model": "gpt-4.1",
+  "ollama_url": "http://localhost:11434",
+  "openai_base_url": "https://models.inference.ai.azure.com",
+  "providers": {
+    "gemini": {
+      "keys": [],
+      "last_used": 0
+    },
+    "openai_compat": {
+      "keys": [
+      ],
+      "last_used": 0
+    }
+  }
+}

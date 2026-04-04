@@ -361,7 +361,8 @@ def _process_pipeline(llm_config, tts_config):
         return
 
     text = transcriber.transcribe_audio()
-    if not text:
+    if not text or not text.strip():
+        print("[system] 转录为空，已忽略。")
         return
 
     append_history("user", text)
@@ -396,6 +397,16 @@ def handle_stop_hotkey(llm_config, tts_config):
     thread.start()
 
 
+def handle_start_hotkey():
+    if _processing_lock.locked():
+        print("[system] 正在处理上一段，请稍后再录音。")
+        return
+    if recorder.recording_state.get("is_recording"):
+        print("[system] 已在录音中。")
+        return
+    recorder.start_recording()
+
+
 def main():
     llm_config = load_config(interactive=True)
     tts_config = load_tts_config()
@@ -407,7 +418,7 @@ def main():
     print("  Alt+3 -> new session")
     print("  Esc   -> exit")
 
-    keyboard.add_hotkey("alt+1", lambda: recorder.start_recording())
+    keyboard.add_hotkey("alt+1", handle_start_hotkey)
     keyboard.add_hotkey("alt+2", lambda: handle_stop_hotkey(llm_config, tts_config))
     keyboard.add_hotkey("alt+3", clear_history)
 

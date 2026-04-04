@@ -358,6 +358,42 @@ def generate(prompt, config: LLMConfig):
     raise ValueError(f"不支持的 AI 提供商: {config.provider}")
 
 
+def generate_chat(messages, config: LLMConfig, temperature=0.7):
+    """
+    根据配置生成聊天回复（支持带 role 的历史消息）
+
+    messages: [{"role": "system|user|assistant", "content": "..."}, ...]
+    """
+    provider = config.provider.lower()
+
+    if provider in {"openai", "openai_compat", "api"}:
+        return _generate_openai_compat_messages(messages, config, temperature)
+
+    prompt = _messages_to_prompt(messages)
+    if provider == "ollama":
+        return _generate_ollama(prompt, config)
+    if provider == "gemini":
+        return _generate_gemini(prompt, config)
+
+    raise ValueError(f"不支持的 AI 提供商: {config.provider}")
+
+
+def _messages_to_prompt(messages):
+    lines = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if role == "system":
+            prefix = "System"
+        elif role == "assistant":
+            prefix = "Assistant"
+        else:
+            prefix = "User"
+        lines.append(f"{prefix}: {content}")
+    lines.append("Assistant:")
+    return "\n".join(lines)
+
+
 def _generate_ollama(prompt, config: LLMConfig):
     """
     调用本地 Ollama 模型生成回答
@@ -418,6 +454,27 @@ def _generate_openai_compat(prompt, config: LLMConfig):
     
     # 从返回的数据中提取回答
     # data["choices"][0]["message"]["content"] = 第一个回答选项的内容
+    return data["choices"][0]["message"]["content"].strip()
+
+
+def _generate_openai_compat_messages(messages, config: LLMConfig, temperature=0.7):
+    if not config.api_key:
+        raise ValueError("OPENAI_API_KEY 没有设置")
+
+    url = f"{config.openai_base_url}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {config.api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": config.model,
+        "messages": messages,
+        "temperature": temperature,
+    }
+
+    response = requests.post(url, json=payload, headers=headers, timeout=60)
+    response.raise_for_status()
+    data = response.json()
     return data["choices"][0]["message"]["content"].strip()
 
 

@@ -30,8 +30,9 @@ except ImportError:
     mss = None
 
 try:
-    from PIL import ImageGrab
+    from PIL import Image, ImageGrab
 except ImportError:
+    Image = None
     ImageGrab = None
 
 
@@ -75,6 +76,8 @@ DEFAULT_TTS_CONFIG = {
 
 DEFAULT_SCREEN_CONFIG = {
     "monitor_index": 1,
+    "max_dim": 1080,
+    "jpeg_quality": 70,
 }
 
 _processing_lock = threading.Lock()
@@ -127,6 +130,8 @@ def _normalize_screen_config(data):
         config["monitor_index"] = 1
     if config["monitor_index"] < 1:
         config["monitor_index"] = 1
+    config["max_dim"] = _clamp_max_dim(config.get("max_dim", 1080))
+    config["jpeg_quality"] = _clamp_jpeg_quality(config.get("jpeg_quality", 70))
     return config
 
 
@@ -180,6 +185,28 @@ def _prompt_monitor_index(config):
         if 1 <= choice <= len(monitors):
             config["monitor_index"] = choice
     return config
+
+
+def _clamp_max_dim(value):
+    try:
+        dim = int(value)
+    except (TypeError, ValueError):
+        return 1080
+    if dim < 320:
+        return 320
+    return dim
+
+
+def _clamp_jpeg_quality(value):
+    try:
+        quality = int(value)
+    except (TypeError, ValueError):
+        return 70
+    if quality < 50:
+        return 50
+    if quality > 75:
+        return 75
+    return quality
 
 
 def _prompt_number(config, key, label, is_int=False):
@@ -356,6 +383,12 @@ def load_history():
 def clear_history():
     if HISTORY_PATH.exists():
         HISTORY_PATH.write_text("", encoding="utf-8")
+    if SCREENSHOT_DIR.exists():
+        for item in SCREENSHOT_DIR.glob("*.*"):
+            try:
+                item.unlink()
+            except OSError:
+                print(f"[warning] 无法删除截图: {item}")
     print("[system] New session started.")
 
 
@@ -418,11 +451,26 @@ def _save_audio_from_response(response, output_path: Path):
     return None
 
 
+def _resize_image(image, max_dim):
+    if image is None:
+        return None
+    width, height = image.size
+    scale = max(width, height) / float(max_dim)
+    if scale <= 1.0:
+        return image
+    new_size = (int(width / scale), int(height / scale))
+    return image.resize(new_size, Image.LANCZOS)
+
+
 def _capture_screenshot(screen_config):
     _ensure_output_dir()
     _ensure_screenshot_dir()
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    output_path = SCREENSHOT_DIR / f"screen_{timestamp}.png"
+    output_path = SCREENSHOT_DIR / f"screen_{timestamp}.jpg"
+    max_dim = _clamp_max_dim(screen_config.get("max_dim", 1080))
+    quality = _clamp_jpeg_quality(screen_config.get("jpeg_quality", 70))
+
+    image = None
 
     if mss is not None:
         with mss.mss() as sct:
@@ -431,21 +479,36 @@ def _capture_screenshot(screen_config):
             if index < 1 or index >= len(monitors):
                 index = 1
             shot = sct.grab(monitors[index])
-            mss.tools.to_png(shot.rgb, shot.size, output=str(output_path))
-        return output_path
+            if Image is not None:
+                image = Image.frombytes("RGB", shot.size, shot.rgb)
+            else:
+                png_path = SCREENSHOT_DIR / f"screen_{timestamp}.png"
+                mss.tools.to_png(shot.rgb, shot.size, output=str(png_path))
+                print("[warning] 未安装 Pillow，已保存 PNG 原图。")
+                return png_path
 
-    if ImageGrab is not None:
+    if image is None and ImageGrab is not None:
         image = ImageGrab.grab()
-        image.save(output_path, "PNG")
-        return output_path
 
-    print("[warning] 缺少截图依赖，请安装 mss 或 Pillow。")
-    return None
+    if image is None:
+        print("[warning] 缺少截图依赖，请安装 mss 或 Pillow。")
+        return None
+
+    if Image is None:
+        print("[warning] 未安装 Pillow，无法压缩截图。")
+        return None
+
+    image = _resize_image(image, max_dim)
+    image = image.convert("RGB")
+    image.save(output_path, "JPEG", quality=quality, optimize=True)
+    return output_path
 
 
 def _image_to_data_url(path: Path):
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-    return f"data:image/png;base64,{encoded}"
+    ext = path.suffix.lower()
+    mime = "image/jpeg" if ext in {".jpg", ".jpeg"} else "image/png"
+    return f"data:{mime};base64,{encoded}"
 
 
 def _attach_image_to_messages(messages, image_path: Path):

@@ -5,10 +5,12 @@ LLM_OtakuWifu_Copilot 主程序
 
 from datetime import datetime
 from pathlib import Path
+import audioop
 import base64
 import json
 import threading
 import time
+import wave
 
 import keyboard
 import requests
@@ -21,14 +23,27 @@ try:
 except ImportError:
     winsound = None
 
+try:
+    import mss
+    import mss.tools
+except ImportError:
+    mss = None
+
+try:
+    from PIL import ImageGrab
+except ImportError:
+    ImageGrab = None
+
 
 OUTPUT_DIR = Path("outputs")
 HISTORY_PATH = OUTPUT_DIR / "chat_history.jsonl"
 LAST_REPLY_TEXT_PATH = OUTPUT_DIR / "latest_reply.txt"
 LAST_REPLY_AUDIO_PATH = OUTPUT_DIR / "latest_reply.wav"
 TTS_CONFIG_PATH = OUTPUT_DIR / "tts_config.json"
+SCREEN_CONFIG_PATH = OUTPUT_DIR / "screen_config.json"
+SCREENSHOT_DIR = OUTPUT_DIR / "screenshots"
 
-SYSTEM_PROMPT = ""
+SYSTEM_PROMPT = "你的名字是响，是一个慵懒但敏锐的15岁少女，你和用户是平等的朋友关系。你不需要对他使用敬语，可以对他开玩笑互损。说话要简短，要直白，类似正常朋友之间的交流。你不需要刻意模仿少女的说话方式，但要保持自然和真实。总之，你就是一个普通的15岁少女，和用户是好朋友，聊天内容要轻松有趣，不要太严肃。"
 
 DEFAULT_TTS_CONFIG = {
     "base_url": "http://127.0.0.1:9880",
@@ -55,13 +70,23 @@ DEFAULT_TTS_CONFIG = {
     "super_sampling": False,
     "overlap_length": 2,
     "min_chunk_length": 16,
+    "volume": 0.7,
+}
+
+DEFAULT_SCREEN_CONFIG = {
+    "monitor_index": 1,
 }
 
 _processing_lock = threading.Lock()
+_pending_screenshot = False
 
 
 def _ensure_output_dir():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _ensure_screenshot_dir():
+    SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _load_json(path: Path, default_value):
@@ -92,6 +117,19 @@ def _normalize_tts_config(data):
     return config
 
 
+def _normalize_screen_config(data):
+    config = dict(DEFAULT_SCREEN_CONFIG)
+    if isinstance(data, dict):
+        config.update({k: v for k, v in data.items() if k in config})
+    try:
+        config["monitor_index"] = int(config.get("monitor_index", 1))
+    except (TypeError, ValueError):
+        config["monitor_index"] = 1
+    if config["monitor_index"] < 1:
+        config["monitor_index"] = 1
+    return config
+
+
 def _prompt_if_missing(config, key, label):
     value = str(config.get(key, "")).strip()
     if value:
@@ -119,6 +157,31 @@ def _prompt_with_default(config, key, label, hint=None):
     return config
 
 
+def _prompt_monitor_index(config):
+    if mss is None:
+        print("[warning] 未安装 mss，无法列出多屏，默认截图为全屏。")
+        return config
+
+    with mss.mss() as sct:
+        monitors = sct.monitors[1:]
+
+    if not monitors:
+        print("[warning] 未检测到屏幕信息，默认截图为全屏。")
+        return config
+
+    default_index = config.get("monitor_index", 1)
+    print("[setup] 可用屏幕：")
+    for idx, mon in enumerate(monitors, start=1):
+        print(f"  {idx}) {mon['width']}x{mon['height']} ({mon['left']},{mon['top']})")
+
+    value = input(f"选择默认截图屏幕 (回车使用默认: {default_index})\n> ").strip()
+    if value.isdigit():
+        choice = int(value)
+        if 1 <= choice <= len(monitors):
+            config["monitor_index"] = choice
+    return config
+
+
 def _prompt_number(config, key, label, is_int=False):
     default_value = config.get(key, "")
     value = input(f"[setup] {label} (回车使用默认: {default_value})\n> ").strip()
@@ -129,6 +192,18 @@ def _prompt_number(config, key, label, is_int=False):
     except ValueError:
         print("[warning] 输入不是数字，已保持默认值")
     return config
+
+
+def _clamp_volume(value):
+    try:
+        volume = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    if volume < 0:
+        return 0.0
+    if volume > 1.0:
+        return 1.0
+    return volume
 
 
 def _normalize_path(value):
@@ -221,17 +296,31 @@ def load_tts_config():
         config = _prompt_number(config, "batch_size", "batch_size", is_int=True)
         config = _prompt_number(config, "sample_steps", "采样步数", is_int=True)
         config = _prompt_number(config, "fragment_interval", "分段间隔(秒)")
+        config = _prompt_number(config, "volume", "播放音量(0.0-1.0)")
 
     config["ref_audio_path"] = _normalize_path(config.get("ref_audio_path", ""))
     config["aux_ref_audio_paths"] = [
         _normalize_path(path) for path in config.get("aux_ref_audio_paths", [])
     ]
+    config["volume"] = _clamp_volume(config.get("volume", 1.0))
 
     _save_json(TTS_CONFIG_PATH, config)
     return config
 
 
-def append_history(role, content):
+def load_screen_config():
+    _ensure_output_dir()
+    has_existing_file = SCREEN_CONFIG_PATH.exists()
+    raw = _load_json(SCREEN_CONFIG_PATH, DEFAULT_SCREEN_CONFIG)
+    config = _normalize_screen_config(raw)
+
+    if not has_existing_file:
+        config = _prompt_monitor_index(config)
+        _save_json(SCREEN_CONFIG_PATH, config)
+    return config
+
+
+def append_history(role, content, meta=None):
     if not content:
         return
     _ensure_output_dir()
@@ -240,6 +329,8 @@ def append_history(role, content):
         "content": content,
         "time": datetime.utcnow().isoformat() + "Z",
     }
+    if meta:
+        record["meta"] = meta
     with HISTORY_PATH.open("a", encoding="utf-8") as file:
         file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -327,6 +418,62 @@ def _save_audio_from_response(response, output_path: Path):
     return None
 
 
+def _capture_screenshot(screen_config):
+    _ensure_output_dir()
+    _ensure_screenshot_dir()
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    output_path = SCREENSHOT_DIR / f"screen_{timestamp}.png"
+
+    if mss is not None:
+        with mss.mss() as sct:
+            monitors = sct.monitors
+            index = int(screen_config.get("monitor_index", 1))
+            if index < 1 or index >= len(monitors):
+                index = 1
+            shot = sct.grab(monitors[index])
+            mss.tools.to_png(shot.rgb, shot.size, output=str(output_path))
+        return output_path
+
+    if ImageGrab is not None:
+        image = ImageGrab.grab()
+        image.save(output_path, "PNG")
+        return output_path
+
+    print("[warning] 缺少截图依赖，请安装 mss 或 Pillow。")
+    return None
+
+
+def _image_to_data_url(path: Path):
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def _attach_image_to_messages(messages, image_path: Path):
+    if not image_path or not image_path.exists():
+        return messages
+    data_url = _image_to_data_url(image_path)
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            text = msg.get("content")
+            if not isinstance(text, str):
+                text = ""
+            msg["content"] = [
+                {"type": "text", "text": text},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ]
+            return messages
+    messages.append(
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": ""},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ],
+        }
+    )
+    return messages
+
+
 def synthesize_tts(text, tts_config):
     base_url = tts_config.get("base_url", "http://127.0.0.1:9880").rstrip("/")
     url = f"{base_url}/tts"
@@ -356,7 +503,27 @@ def play_audio(path: Path):
     winsound.PlaySound(str(path), winsound.SND_FILENAME | winsound.SND_ASYNC)
 
 
-def _process_pipeline(llm_config, tts_config):
+def _apply_volume_wav(path: Path, volume):
+    volume = _clamp_volume(volume)
+    if volume >= 0.999:
+        return path
+
+    scaled_path = OUTPUT_DIR / "latest_reply_scaled.wav"
+    try:
+        with wave.open(str(path), "rb") as reader:
+            params = reader.getparams()
+            frames = reader.readframes(reader.getnframes())
+        scaled_frames = audioop.mul(frames, params.sampwidth, volume)
+        with wave.open(str(scaled_path), "wb") as writer:
+            writer.setparams(params)
+            writer.writeframes(scaled_frames)
+        return scaled_path
+    except Exception:
+        print("[warning] Failed to apply volume, playing original audio.")
+        return path
+
+
+def _process_pipeline(llm_config, tts_config, with_screenshot=False):
     if not recorder.stop_recording():
         return
 
@@ -365,9 +532,25 @@ def _process_pipeline(llm_config, tts_config):
         print("[system] 转录为空，已忽略。")
         return
 
-    append_history("user", text)
+    screenshot_path = None
+    if with_screenshot:
+        screen_config = load_screen_config()
+        screenshot_path = _capture_screenshot(screen_config)
+
+    meta = None
+    if screenshot_path:
+        meta = {"screenshot": screenshot_path.as_posix()}
+
+    append_history("user", text, meta=meta)
     history = load_history()
     messages = build_messages(history)
+
+    if screenshot_path:
+        provider = llm_config.provider.lower()
+        if provider in {"openai", "openai_compat", "api"}:
+            messages = _attach_image_to_messages(messages, screenshot_path)
+        else:
+            print("[warning] 当前提供商不支持图片，已忽略截图。")
 
     reply = generate_chat(messages, llm_config)
     if not reply:
@@ -379,7 +562,8 @@ def _process_pipeline(llm_config, tts_config):
 
     audio_path = synthesize_tts(reply, tts_config)
     if audio_path:
-        play_audio(audio_path)
+        adjusted_path = _apply_volume_wav(audio_path, tts_config.get("volume", 1.0))
+        play_audio(adjusted_path)
 
 
 def handle_stop_hotkey(llm_config, tts_config):
@@ -387,9 +571,13 @@ def handle_stop_hotkey(llm_config, tts_config):
         print("[system] Busy. Please wait...")
         return
 
+    global _pending_screenshot
+    with_screenshot = _pending_screenshot
+    _pending_screenshot = False
+
     def _runner():
         try:
-            _process_pipeline(llm_config, tts_config)
+            _process_pipeline(llm_config, tts_config, with_screenshot=with_screenshot)
         finally:
             _processing_lock.release()
 
@@ -397,13 +585,15 @@ def handle_stop_hotkey(llm_config, tts_config):
     thread.start()
 
 
-def handle_start_hotkey():
+def handle_start_hotkey(with_screenshot=False):
     if _processing_lock.locked():
         print("[system] 正在处理上一段，请稍后再录音。")
         return
     if recorder.recording_state.get("is_recording"):
         print("[system] 已在录音中。")
         return
+    global _pending_screenshot
+    _pending_screenshot = with_screenshot
     recorder.start_recording()
 
 
@@ -414,13 +604,15 @@ def main():
     print("[system] Assistant ready.")
     print("Hotkeys:")
     print("  Alt+1 -> start recording")
-    print("  Alt+2 -> stop and process")
-    print("  Alt+3 -> new session")
+    print("  Alt+2 -> start recording (with screenshot)")
+    print("  Alt+3 -> stop and process")
+    print("  Alt+0 -> clear history")
     print("  Esc   -> exit")
 
-    keyboard.add_hotkey("alt+1", handle_start_hotkey)
-    keyboard.add_hotkey("alt+2", lambda: handle_stop_hotkey(llm_config, tts_config))
-    keyboard.add_hotkey("alt+3", clear_history)
+    keyboard.add_hotkey("alt+1", lambda: handle_start_hotkey(with_screenshot=False))
+    keyboard.add_hotkey("alt+2", lambda: handle_start_hotkey(with_screenshot=True))
+    keyboard.add_hotkey("alt+3", lambda: handle_stop_hotkey(llm_config, tts_config))
+    keyboard.add_hotkey("alt+0", clear_history)
 
     keyboard.wait("esc")
     print("[system] Exiting.")

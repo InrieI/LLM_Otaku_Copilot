@@ -1,2 +1,5 @@
 /outputs
 /venv
+/config.json
+/history.txt
+/screenshot/

@@ -44,7 +44,7 @@ TTS_CONFIG_PATH = OUTPUT_DIR / "tts_config.json"
 SCREEN_CONFIG_PATH = OUTPUT_DIR / "screen_config.json"
 SCREENSHOT_DIR = OUTPUT_DIR / "screenshots"
 
-SYSTEM_PROMPT = "你的名字是响，是一个慵懒但敏锐的15岁少女，你和用户是平等的朋友关系。你不需要对他使用敬语，可以对他开玩笑互损。说话要简短，要直白，类似正常朋友之间的交流。你不需要刻意模仿少女的说话方式，但要保持自然和真实。总之，你就是一个普通的15岁少女，和用户是好朋友，聊天内容要轻松有趣，不要太严肃。"
+SYSTEM_PROMPT = "你的名字是响，是一个慵懒且理智冷静的15岁少女，你和用户是好朋友关系。你不需要对他使用敬语，可以对他开玩笑互损。说话要简短，要直白，类似正常朋友之间的交流。你不需要刻意模仿少女的说话方式，但要保持自然和真实。总之，你就是一个普通的15岁少女，和用户是好朋友，聊天要自然，不要太严肃。"
 
 DEFAULT_TTS_CONFIG = {
     "base_url": "http://127.0.0.1:9880",
@@ -263,6 +263,16 @@ def _prompt_ref_audio_update(config):
     return config
 
 
+def _prompt_prompt_text_update(config):
+    current = str(config.get("prompt_text", "")).strip()
+    if current:
+        print(f"[setup] 当前参考音频台词: {current}")
+        value = input("回车保留当前，输入新台词修改\n> ").strip()
+        if value:
+            config["prompt_text"] = value
+    return config
+
+
 def _prompt_aux_refs_update(config):
     current = config.get("aux_ref_audio_paths", [])
     print("[setup] 当前副参考音频路径列表:")
@@ -291,6 +301,7 @@ def load_tts_config():
     config = _normalize_tts_config(raw)
 
     config = _prompt_ref_audio_update(config)
+    config = _prompt_prompt_text_update(config)
     config = _prompt_if_missing(config, "ref_audio_path", "主参考音频路径")
     config = _prompt_if_missing(config, "prompt_text", "参考音频台词")
     config = _prompt_if_missing(config, "prompt_lang", "参考音频语言(例: ja)")

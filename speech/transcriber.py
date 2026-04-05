@@ -77,14 +77,14 @@ def load_audio_with_ffmpeg(file_path: Path, ffmpeg_exe: Path, sr: int = 16000):
     return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
 
 
-def transcribe_audio(filename=DEFAULT_INPUT, language="zh", model_name="small"):
+def transcribe_audio(filename=DEFAULT_INPUT, language="zh", model_name="medium"):
     """
     将 WAV 音频文件转换成文字（使用 OpenAI 的 Whisper 模型）
     
     参数:
     - filename: 要转录的音频文件路径
     - language: 音频语言（"zh" = 中文，"en" = 英文，等等）
-    - model_name: Whisper 模型大小（"base" = 轻量级快速，"small"/"large" = 更准确但更慢）
+    - model_name: Whisper 模型大小（"base" = 轻量级快速，"small"/"medium"/"large" = 更准确但更慢）
     
     返回: 转录后的文字（字符串）或 None（失败）
     
@@ -103,7 +103,7 @@ def transcribe_audio(filename=DEFAULT_INPUT, language="zh", model_name="small"):
         print(FFMPEG_INFO)
 
     print("[system] 正在加载 Whisper 模型...")
-    print("[info] 首次运行会自动下载模型文件（约 461MB 左右）")
+    print("[info] 首次运行会自动下载模型文件（约 1.5GB 左右）")
 
     try:
         # 加载 Whisper 模型到内存

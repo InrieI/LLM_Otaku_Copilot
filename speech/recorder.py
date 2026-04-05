@@ -37,7 +37,7 @@ def start_recording(filename=DEFAULT_OUTPUT):
 
     audio = pyaudio.PyAudio()  # 创建 PyAudio 对象（麦克风管理器）
 
-    print("[system] 录音开始 (按 Alt+2 停止)...")
+    print("[system] 录音开始 (按 Alt+3 停止)...")
 
     try:
         # 打开麦克风输入流
@@ -62,7 +62,7 @@ def start_recording(filename=DEFAULT_OUTPUT):
         recording_state["rate"] = rate
 
         # 创建一个"后台线程"来读取音频
-        # 这样主程序可以继续响应快捷键（按 Alt+2），不会被卡住
+        # 这样主程序可以继续响应快捷键（按 Alt+3），不会被卡住
         import threading
 
         def read_audio():
@@ -90,7 +90,7 @@ def start_recording(filename=DEFAULT_OUTPUT):
 
 def stop_recording():
     """
-    停止录音（按 Alt+2 时调用）
+    停止录音（按 Alt+3 时调用）
     
     原理：
     1. 叫后台线程停止读取
@@ -143,20 +143,20 @@ def record_with_hotkeys(filename=DEFAULT_OUTPUT):
     启动快捷键监听，控制录音的开始和停止
     
     快捷键设置：
-    - Alt+1：开始录音
-    - Alt+2：停止录音
+    - Alt+1/2：开始录音
+    - Alt+3：停止录音
     - Esc：退出程序
     
     参数: filename - 录音保存文件路径
     """
-    print("按 Alt+1 开始录音")
-    print("按 Alt+2 停止录音")
+    print("按 Alt+1/2 开始录音")
+    print("按 Alt+3 停止录音")
     print("按 Esc 退出程序")
 
     # 绑定快捷键
     # 当按下某个快捷键时，就会调用后面的函数
     keyboard.add_hotkey("alt+1", lambda: start_recording(filename))
-    keyboard.add_hotkey("alt+2", stop_recording)
+    keyboard.add_hotkey("alt+3", stop_recording)
 
     # keyboard.wait() 会让程序一直运行，直到你按下指定的键（这里是 Esc）
     keyboard.wait("esc")

@@ -12,9 +12,9 @@ DEFAULT_OUTPUT = Path("outputs") / "input.wav"
 recording_state = {"stream": None, "frames": None, "audio": None, "is_recording": False}
 
 
-def start_recording(filename=DEFAULT_OUTPUT):
+def start_recording(filename=DEFAULT_OUTPUT, stop_hint="再次按当前热键停止并处理"):
     """
-    开始录音（按 Alt+1 时调用）
+    开始录音（由主流程热键触发）
     
     原理：
     1. 打开麦克风
@@ -37,7 +37,7 @@ def start_recording(filename=DEFAULT_OUTPUT):
 
     audio = pyaudio.PyAudio()  # 创建 PyAudio 对象（麦克风管理器）
 
-    print("[system] 录音开始 (按 Alt+3 停止)...")
+    print(f"[system] 录音开始 ({stop_hint})...")
 
     try:
         # 打开麦克风输入流
@@ -90,7 +90,7 @@ def start_recording(filename=DEFAULT_OUTPUT):
 
 def stop_recording():
     """
-    停止录音（按 Alt+3 时调用）
+    停止录音（由主流程热键触发）
     
     原理：
     1. 叫后台线程停止读取
@@ -142,14 +142,14 @@ def record_with_hotkeys(filename=DEFAULT_OUTPUT):
     """
     启动快捷键监听，控制录音的开始和停止
     
-    快捷键设置：
-    - Alt+1/2：开始录音
+    快捷键设置（演示模式）：
+    - Alt+1：开始录音
     - Alt+3：停止录音
     - Esc：退出程序
     
     参数: filename - 录音保存文件路径
     """
-    print("按 Alt+1/2 开始录音")
+    print("按 Alt+1 开始录音")
     print("按 Alt+3 停止录音")
     print("按 Esc 退出程序")
 

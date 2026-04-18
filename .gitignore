@@ -1,5 +1,35 @@
-/outputs
-/venv
+# Local runtime outputs
+outputs/
+history.txt
+screenshot/
+
+# Python caches and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Local config and secrets
 config.json
-/history.txt
-/screenshot/
+.env
+.env.*
+!.env.example
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# OS / editor junk
+Thumbs.db
+Desktop.ini
+.idea/
+*.iml
+
+# Windows shortcuts (do not publish)
+*.lnk

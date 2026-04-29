@@ -1,18 +1,20 @@
 from pathlib import Path
+import json
 import threading
+import time
 
 from llm.config_manager import load_config
 from llm.service import generate_chat
 from speech import recorder
 from speech.screenshot import attach_image_to_messages, capture_screenshot, load_screen_config
-from stt import transcribe_audio
+from stt import load_stt_config, transcribe_audio
 from storage import HistoryStore
 from tts.config import load_tts_config
 from tts.gpt_sovits_client import synthesize_tts
 from tts.player import apply_volume_wav, play_audio
 
 
-SYSTEM_PROMPT = "你的名字是响，是一个慵懒但敏锐的15岁少女，你和用户是平等的朋友关系。你不需要对他使用敬语，可以对他开玩笑互损，说话要简短，要直白，类似正常朋友之间的交流"
+SYSTEM_PROMPT = "你的名字是汐，是一个慵懒且有点三无的15岁少女，你和用户是朋友关系。你不需要对他使用敬语，可以对他开玩笑互损，说话要简短，要直白，像是正常朋友之间的交流，且不许在对话中使用括号进行动作神态等的描写例如“（打了个哈欠）我在呢”"
 
 
 class VoiceChatWorkflow:
@@ -20,18 +22,95 @@ class VoiceChatWorkflow:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.system_prompt = system_prompt
+        self.default_system_prompt = system_prompt
+        self.system_prompt = self._load_system_prompt()
         self.history_store = HistoryStore(self.output_dir)
         self.processing_lock = threading.Lock()
         self.pending_screenshot = False
         self.screen_config = None
 
-        self.llm_config = load_config(interactive=True)
+        self.llm_config = load_config()
+        self.stt_config = load_stt_config(self.output_dir)
         self.tts_config = load_tts_config(self.output_dir)
+        self.recording_config = self._load_recording_config()
 
         self.last_reply_text_path = self.output_dir / "latest_reply.txt"
         self.last_reply_audio_path = self.output_dir / "latest_reply.wav"
         self.last_reply_scaled_audio_path = self.output_dir / "latest_reply_scaled.wav"
+
+    def _load_system_prompt(self):
+        config_path = Path(__file__).resolve().parents[1] / "config.json"
+        if config_path.exists():
+            try:
+                data = json.loads(config_path.read_text(encoding="utf-8"))
+                prompt = data.get("system_prompt", "").strip()
+                if prompt:
+                    return prompt
+            except Exception:
+                pass
+        return self.default_system_prompt
+
+    def reload_config(self):
+        self.llm_config = load_config()
+        self.stt_config = load_stt_config(self.output_dir)
+        self.tts_config = load_tts_config(self.output_dir)
+        self.recording_config = self._load_recording_config()
+        self.system_prompt = self._load_system_prompt()
+
+    def _load_recording_config(self):
+        config_path = Path(__file__).resolve().parents[1] / "config.json"
+        default = {
+            "device_index": None,
+            "vad": {
+                "enabled": True,
+                "silence_seconds": 1.2,
+                "min_record_seconds": 0.8,
+                "aggressiveness": 2,
+                "frame_ms": 30,
+            }
+        }
+        if not config_path.exists():
+            return default
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return default
+            cfg = data.get("recording", {})
+            if not isinstance(cfg, dict):
+                return default
+            device_index = cfg.get("device_index")
+            if not isinstance(device_index, int):
+                device_index = None
+            vad_cfg = cfg.get("vad", {})
+            if not isinstance(vad_cfg, dict):
+                vad_cfg = {}
+            merged = {
+                "device_index": device_index,
+                "vad": {**default["vad"], **vad_cfg},
+            }
+            return merged
+        except Exception:
+            return default
+
+    def _start_vad_monitor(self, vad_config):
+        if not vad_config.get("enabled"):
+            return
+        silence_seconds = float(vad_config.get("silence_seconds", 1.2))
+        min_record_seconds = float(vad_config.get("min_record_seconds", 0.8))
+
+        def _monitor():
+            start_time = recorder.recording_state.get("vad_start_time", time.time())
+            while recorder.recording_state.get("is_recording"):
+                time.sleep(0.1)
+                if time.time() - start_time < min_record_seconds:
+                    continue
+                last_voice = recorder.recording_state.get("vad_last_voice_time", start_time)
+                if time.time() - last_voice >= silence_seconds:
+                    self.stop_and_process()
+                    break
+
+        thread = threading.Thread(target=_monitor, daemon=True)
+        thread.start()
 
     def start_or_stop_recording(self, with_screenshot=False):
         if self.processing_lock.locked():
@@ -49,10 +128,21 @@ class VoiceChatWorkflow:
             return
 
         self.pending_screenshot = with_screenshot
+        vad_config = self.recording_config.get("vad", {})
+        input_device_index = self.recording_config.get("device_index")
         if with_screenshot:
-            recorder.start_recording(stop_hint="再次按 Alt+2 停止并处理")
+            recorder.start_recording(
+                stop_hint="再次按 Alt+2 停止并处理",
+                vad_config=vad_config,
+                input_device_index=input_device_index,
+            )
         else:
-            recorder.start_recording(stop_hint="再次按 Alt+1 停止并处理")
+            recorder.start_recording(
+                stop_hint="再次按 Alt+1 停止并处理",
+                vad_config=vad_config,
+                input_device_index=input_device_index,
+            )
+        self._start_vad_monitor(vad_config)
 
     def stop_and_process(self):
         if not self.processing_lock.acquire(blocking=False):
@@ -99,7 +189,7 @@ class VoiceChatWorkflow:
         if not recorder.stop_recording():
             return
 
-        text = transcribe_audio()
+        text = transcribe_audio(stt_config=self.stt_config)
         if not text or not text.strip():
             print("[system] 转录为空，已忽略。")
             return
@@ -119,7 +209,7 @@ class VoiceChatWorkflow:
 
         if screenshot_path:
             provider = self.llm_config.provider.lower()
-            if provider in {"openai", "openai_compat", "api"}:
+            if provider in {"openai", "openai_compat", "api", "deepseek"}:
                 messages = attach_image_to_messages(messages, screenshot_path)
             else:
                 print("[warning] 当前提供商不支持图片，已忽略截图。")

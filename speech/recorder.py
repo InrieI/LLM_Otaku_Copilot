@@ -2,7 +2,20 @@ from pathlib import Path
 
 import keyboard
 import pyaudio
+import time
 import wave
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message="pkg_resources is deprecated as an API.*",
+    category=UserWarning,
+)
+
+try:
+    import webrtcvad
+except Exception:
+    webrtcvad = None
 
 # 设置默认输出文件路径（在 outputs 文件夹里）
 DEFAULT_OUTPUT = Path("outputs") / "input.wav"
@@ -12,7 +25,12 @@ DEFAULT_OUTPUT = Path("outputs") / "input.wav"
 recording_state = {"stream": None, "frames": None, "audio": None, "is_recording": False}
 
 
-def start_recording(filename=DEFAULT_OUTPUT, stop_hint="再次按当前热键停止并处理"):
+def start_recording(
+    filename=DEFAULT_OUTPUT,
+    stop_hint="再次按当前热键停止并处理",
+    vad_config=None,
+    input_device_index=None,
+):
     """
     开始录音（由主流程热键触发）
     
@@ -30,24 +48,40 @@ def start_recording(filename=DEFAULT_OUTPUT, stop_hint="再次按当前热键停
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # 音频参数设置
-    chunk = 1024                            # 每次读取 1024 个采样点
     audio_format = pyaudio.paInt16          # 16 位整数格式（质量好）
     channels = 1                            # 单声道（mono）
-    rate = 44100                            # 采样率：每秒 44100 个采样点
+    rate = 16000                            # 采样率：每秒 16000 个采样点
 
     audio = pyaudio.PyAudio()  # 创建 PyAudio 对象（麦克风管理器）
+
+    vad_config = vad_config or {}
+    vad_enabled = bool(vad_config.get("enabled", False))
+    vad_aggressiveness = int(vad_config.get("aggressiveness", 2))
+    vad_frame_ms = int(vad_config.get("frame_ms", 30))
+    if vad_frame_ms not in (10, 20, 30):
+        vad_frame_ms = 30
+    if vad_enabled and webrtcvad is None:
+        print("[warning] webrtcvad not installed. VAD disabled.")
+        vad_enabled = False
+
+    chunk = int(rate * (vad_frame_ms / 1000.0))
+    vad = webrtcvad.Vad(vad_aggressiveness) if vad_enabled else None
 
     print(f"[system] 录音开始 ({stop_hint})...")
 
     try:
         # 打开麦克风输入流
-        stream = audio.open(
-            format=audio_format,
-            channels=channels,
-            rate=rate,
-            input=True,                     # input=True 即"从麦克风读取"
-            frames_per_buffer=chunk,
-        )
+        stream_kwargs = {
+            "format": audio_format,
+            "channels": channels,
+            "rate": rate,
+            "input": True,  # input=True 即"从麦克风读取"
+            "frames_per_buffer": chunk,
+        }
+        if input_device_index is not None:
+            stream_kwargs["input_device_index"] = int(input_device_index)
+
+        stream = audio.open(**stream_kwargs)
 
         # 把各种信息保存到全局状态字典中
         # 这样 stop_recording() 函数可以访问这些信息
@@ -60,6 +94,12 @@ def start_recording(filename=DEFAULT_OUTPUT, stop_hint="再次按当前热键停
         recording_state["channels"] = channels
         recording_state["audio_format"] = audio_format
         recording_state["rate"] = rate
+        recording_state["input_device_index"] = input_device_index
+        recording_state["vad_enabled"] = vad_enabled
+        recording_state["vad"] = vad
+        recording_state["vad_frame_ms"] = vad_frame_ms
+        recording_state["vad_start_time"] = time.time()
+        recording_state["vad_last_voice_time"] = recording_state["vad_start_time"]
 
         # 创建一个"后台线程"来读取音频
         # 这样主程序可以继续响应快捷键（按 Alt+3），不会被卡住
@@ -69,8 +109,12 @@ def start_recording(filename=DEFAULT_OUTPUT, stop_hint="再次按当前热键停
             """在后台持续读取音频，直到 is_recording 变成 False"""
             while recording_state["is_recording"]:
                 try:
-                    # 从麦克风读取一块音频数据（1024 个采样点）
+                    # 从麦克风读取一块音频数据
                     data = stream.read(chunk, exception_on_overflow=False)
+                    if recording_state.get("vad_enabled"):
+                        vad_instance = recording_state.get("vad")
+                        if vad_instance and vad_instance.is_speech(data, rate):
+                            recording_state["vad_last_voice_time"] = time.time()
                     # 把这块数据加到列表里，等待保存
                     recording_state["frames"].append(data)
                 except Exception as e:

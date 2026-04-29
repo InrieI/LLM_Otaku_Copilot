@@ -9,13 +9,16 @@ def _headers(api_key):
 
 
 def _chat_completions_url(config):
-    base_url = str(getattr(config, "openai_base_url", "")).rstrip("/")
+    base_url = str(getattr(config, "deepseek_base_url", "") or "https://api.deepseek.com")
+    base_url = base_url.rstrip("/")
+    if not base_url.lower().endswith("/v1"):
+        base_url = f"{base_url}/v1"
     return f"{base_url}/chat/completions"
 
 
 def generate(prompt, config, temperature=0.7):
     if not config.api_key:
-        raise ValueError("OPENAI_API_KEY 没有设置")
+        raise ValueError("DEEPSEEK_API_KEY 没有设置")
 
     url = _chat_completions_url(config)
     payload = {
@@ -32,7 +35,7 @@ def generate(prompt, config, temperature=0.7):
 
 def generate_messages(messages, config, temperature=0.7):
     if not config.api_key:
-        raise ValueError("OPENAI_API_KEY 没有设置")
+        raise ValueError("DEEPSEEK_API_KEY 没有设置")
 
     url = _chat_completions_url(config)
     payload = {

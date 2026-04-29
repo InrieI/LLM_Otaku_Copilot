@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, minimal-ui">
+  <!-- Google Fonts & Material Symbols -->
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet" />
+  <!-- Vuetify CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/vuetify@3.3.15/dist/vuetify.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.0.96/css/materialdesignicons.min.css" rel="stylesheet">
+
+  <style>
+    :root {
+      /* 柔和的 MD3 浅蓝配色体系 */
+      --md-sys-color-background: #F2F7FC; /* 非常淡的灰蓝色背景 */
+      --md-sys-color-surface: #FAFCFF;    /* 接近纯白的卡片表面 */
+      --md-sys-color-primary: #00639B;    /* 核心蓝 */
+      --md-sys-color-on-primary: #FFFFFF;
+      --md-sys-color-primary-container: #CDE5FF; /* 柔和的浅蓝容器色 */
+      --md-sys-color-on-primary-container: #001D33; /* 容器内深色文本 */
+    }
+    body {
+      background-color: var(--md-sys-color-background);
+      font-family: 'Google Sans', 'Roboto', sans-serif !important;
+      -webkit-font-smoothing: antialiased;
+    }
+    .v-application {
+      background-color: transparent !important;
+      font-family: 'Google Sans', sans-serif !important;
+    }
+    
+    /* MD3 Card Styling */
+    .md3-card {
+      border-radius: 28px !important;
+      box-shadow: 0 1px 3px 0 rgba(0,0,0,0.1) !important;
+      background-color: var(--md-sys-color-surface) !important;
+      padding: 16px 8px;
+      transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
+      border: 1px solid rgba(0,0,0,0.02);
+    }
+    .md3-card:hover {
+      box-shadow: 0 4px 12px 0 rgba(0,0,0,0.08) !important;
+      transform: translateY(-2px);
+    }
+    
+    /* MD3 Character Cards (Tonal) */
+    .char-card {
+      border-radius: 24px !important;
+      background-color: var(--md-sys-color-primary-container) !important;
+      color: var(--md-sys-color-on-primary-container) !important;
+      transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+      padding: 16px;
+      text-align: center;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+    }
+    .char-card::after {
+      content: ''; position: absolute; top:0; left:0; width:100%; height:100%;
+      background: currentColor; opacity: 0; transition: opacity 0.2s;
+    }
+    .char-card:hover::after {
+      opacity: 0.08;
+    }
+    
+    /* MD3 App Bar */
+    .v-toolbar {
+      background-color: var(--md-sys-color-background) !important;
+      color: #1A1C1E !important;
+    }
+    .v-toolbar-title {
+      font-family: 'Google Sans', sans-serif;
+      font-weight: 500;
+      font-size: 1.25rem;
+    }
+
+    /* Floating Action Button (FAB) Theme */
+    .md3-fab {
+      border-radius: 16px !important;
+      height: 64px !important;
+      background-color: var(--md-sys-color-primary-container) !important;
+      color: var(--md-sys-color-on-primary-container) !important;
+      font-weight: 500 !important;
+      letter-spacing: 0.1px;
+      text-transform: none !important;
+      font-size: 14px !important;
+      padding: 0 24px !important;
+      box-shadow: 0 4px 8px 0 rgba(0,0,0,0.1) !important;
+    }
+    .md3-fab:hover {
+      box-shadow: 0 6px 12px 0 rgba(0,0,0,0.15) !important;
+    }
+
+    /* Icon styling */
+    .material-symbols-outlined {
+      font-size: 28px !important;
+      vertical-align: middle;
+      color: var(--md-sys-color-primary);
+    }
+    
+    /* Slider Customization for MD3 */
+    .v-slider-thumb__surface {
+      width: 20px !important;
+      height: 20px !important;
+    }
+    
+    /* Text Fields MD3 shape */
+    .v-field--variant-outlined {
+      border-radius: 12px !important;
+    }
+    
+    /* Section Titles */
+    .section-title {
+      display: flex;
+      align-items: center;
+      font-weight: 500;
+      font-size: 1.3rem;
+      letter-spacing: 0;
+      margin-bottom: 24px;
+      color: #1A1C1E;
+    }
+    .section-title span {
+      margin-right: 12px;
+      padding: 8px;
+      background-color: var(--md-sys-color-primary-container);
+      border-radius: 16px;
+    }
+    
+    /* Toggle Base override */
+    .v-btn-group--divided .v-btn {
+        border-color: rgba(0,0,0,0.05) !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <v-app>
+      <v-app-bar flat height="80">
+        <v-container class="d-flex align-center">
+          <v-toolbar-title class="ml-2"><b>OtakuWifu</b></v-toolbar-title>
+          <v-spacer></v-spacer>
+          <v-btn class="md3-fab" @click="saveConfig" v-ripple>
+            <span class="material-symbols-outlined mr-2">save</span>
+            应用并保存
+          </v-btn>
+        </v-container>
+      </v-app-bar>
+
+      <v-main>
+        <v-container style="max-width: 1000px;" class="px-6 pb-12 mt-4">
+          <v-row>
+            <!-- STT Section -->
+            <v-col cols="12" md="6">
+              <v-card class="md3-card" flat>
+                <v-card-text>
+                  <div class="section-title">
+                    <span class="material-symbols-outlined">mic</span> STT
+                  </div>
+                  
+                  <!-- 直观的选中滑动滑块切换 UI -->
+                  <div class="mb-4">
+                    <v-btn-toggle
+                      v-model="config.stt.provider"
+                      mandatory
+                      rounded="pill"
+                      color="primary"
+                      variant="flat"
+                      style="background-color: var(--md-sys-color-background); border: 1px solid rgba(0,0,0,0.05);"
+                    >
+                      <v-btn value="local" class="px-6 text-capitalize" style="letter-spacing: 0;">
+                        Whisper
+                      </v-btn>
+                      <v-btn value="groq" class="px-6 text-capitalize" style="letter-spacing: 0;">
+                        Groq
+                      </v-btn>
+                    </v-btn-toggle>
+                  </div>
+
+                  <v-expand-transition>
+                    <div v-if="config.stt.provider === 'local'" class="mt-2">
+                       <v-text-field v-model="config.stt.local.model_name" label="Whisper 本地模型" variant="outlined" prepend-inner-icon="mdi-cube-outline"></v-text-field>
+                    </div>
+                    <div v-else-if="config.stt.provider === 'groq'" class="mt-2">
+                       <v-text-field v-model="config.stt.groq.model" label="Groq 远程模型" variant="outlined" prepend-inner-icon="mdi-api"></v-text-field>
+                    </div>
+                  </v-expand-transition>
+                </v-card-text>
+              </v-card>
+            </v-col>
+
+            <!-- LLM Section -->
+            <v-col cols="12" md="6">
+              <v-card class="md3-card" flat>
+                <v-card-text>
+                  <div class="section-title">
+                    <span class="material-symbols-outlined">psychology</span> LLM
+                  </div>
+                  
+                  <!-- 在输入框内部左侧增加了明显折叠箭头以提示这是个下拉框 -->
+                  <v-select 
+                    v-model="config.provider" 
+                    :items="llmProviders" 
+                    label="提供商" 
+                    variant="outlined"
+                    prepend-inner-icon="mdi-menu-down"
+                    hint="选择要使用的 API 或本地大模型"
+                    persistent-hint>
+                  </v-select>
+                  
+                  <v-text-field 
+                    v-model="config.model" 
+                    label="模型型号" 
+                    variant="outlined" 
+                    class="mt-4"
+                    hint="例如: deepseek-v4-flash, gpt-4o-mini"
+                    persistent-hint>
+                  </v-text-field>
+                </v-card-text>
+              </v-card>
+            </v-col>
+
+            <!-- System Prompt Section -->
+            <v-col cols="12">
+              <v-card class="md3-card" flat>
+                <v-card-text>
+                  <div class="section-title">
+                    <span class="material-symbols-outlined">edit_note</span> 人设 / System Prompt
+                  </div>
+                  <v-textarea
+                    v-model="config.system_prompt"
+                    label="系统提示词（角色人设）"
+                    variant="outlined"
+                    rows="4"
+                    auto-grow
+                    hide-details
+                    placeholder="在这里定义你的 AI 角色的性格、背景和说话方式..."
+                  ></v-textarea>
+                  <p class="text-caption mt-2" style="color: #6b7280;">修改后点击「应用并保存」生效。留空则使用默认人设。</p>
+                </v-card-text>
+              </v-card>
+            </v-col>
+
+            <!-- Recording Section -->
+            <v-col cols="12">
+              <v-card class="md3-card" flat>
+                <v-card-text>
+                  <div class="section-title">
+                    <span class="material-symbols-outlined">radio_button_checked</span> 录音
+                  </div>
+
+                  <div class="d-flex align-center flex-wrap" style="gap: 12px;">
+                    <v-btn-toggle
+                      v-model="record.mode"
+                      mandatory
+                      rounded="pill"
+                      color="primary"
+                      variant="flat"
+                      :disabled="record.isRecording"
+                      style="background-color: var(--md-sys-color-background); border: 1px solid rgba(0,0,0,0.05);"
+                    >
+                      <v-btn value="text" class="px-6" style="letter-spacing: 0;">
+                        纯文字
+                      </v-btn>
+                      <v-btn value="screenshot" class="px-6" style="letter-spacing: 0;">
+                        截图 + 文字
+                      </v-btn>
+                    </v-btn-toggle>
+
+                    <v-chip v-if="record.isRecording" color="primary" variant="flat" class="ml-2">
+                      录音中
+                    </v-chip>
+                  </div>
+
+                  <div class="d-flex align-center flex-wrap mt-4" style="gap: 12px;">
+                    <v-btn color="primary" variant="flat" :loading="record.busy" @click="toggleRecording">
+                      {{ record.isRecording ? '结束并发送' : '开始录音' }}
+                    </v-btn>
+                    <v-btn variant="text" color="error" :disabled="!record.isRecording" @click="cancelRecording">
+                      丢弃
+                    </v-btn>
+                    <v-btn variant="text" color="primary" @click="clearHistory">
+                      清空历史
+                    </v-btn>
+                  </div>
+                  <p class="text-caption mt-2" style="color: #6b7280;">录音中不可切换模式，停止后再切换。</p>
+
+                  <v-select
+                    v-model="config.recording.device_index"
+                    :items="audioDevices"
+                    item-title="name"
+                    item-value="index"
+                    label="输入设备 (麦克风)"
+                    variant="outlined"
+                    density="comfortable"
+                    clearable
+                    hide-details
+                    class="mt-4"
+                  ></v-select>
+                  <p class="text-caption mt-1" style="color: #6b7280;">留空使用系统默认输入设备。</p>
+
+                  <v-divider class="my-6"></v-divider>
+
+                  <div class="d-flex align-center flex-wrap" style="gap: 12px;">
+                    <v-switch
+                      v-model="config.recording.vad.enabled"
+                      label="自动静音停止 (VAD)"
+                      color="primary"
+                      hide-details
+                    ></v-switch>
+                  </div>
+                  <v-row class="mt-2">
+                    <v-col cols="12" md="6">
+                      <div class="text-body-2 mb-2" style="color: #49454F;">Silence Seconds (静音判定秒数): <b>{{ config.recording.vad.silence_seconds }}</b></div>
+                      <v-slider v-model="config.recording.vad.silence_seconds" min="0.3" max="3.0" step="0.1" color="primary" track-color="primary-container"></v-slider>
+                    </v-col>
+                    <v-col cols="12" md="6">
+                      <div class="text-body-2 mb-2" style="color: #49454F;">Aggressiveness (灵敏度 0-3): <b>{{ config.recording.vad.aggressiveness }}</b></div>
+                      <v-slider v-model="config.recording.vad.aggressiveness" min="0" max="3" step="1" color="primary" track-color="primary-container"></v-slider>
+                    </v-col>
+                    <v-col cols="12" md="6">
+                      <div class="text-body-2 mb-2" style="color: #49454F;">Min Record Seconds (最短录音时长): <b>{{ config.recording.vad.min_record_seconds }}</b></div>
+                      <v-slider v-model="config.recording.vad.min_record_seconds" min="0.2" max="2.0" step="0.1" color="primary" track-color="primary-container"></v-slider>
+                    </v-col>
+                  </v-row>
+                </v-card-text>
+              </v-card>
+            </v-col>
+
+            <!-- Wakeword Section -->
+            <v-col cols="12">
+              <v-card class="md3-card" flat>
+                <v-card-text>
+                  <div class="section-title">
+                    <span class="material-symbols-outlined">hearing</span> 唤醒词
+                  </div>
+
+                  <v-switch
+                    v-model="config.wakeword.enabled"
+                    label="启用 Wake Word (openWakeWord)"
+                    color="primary"
+                    hide-details
+                  ></v-switch>
+
+                  <v-expand-transition>
+                    <div v-if="config.wakeword.enabled" class="mt-4">
+                      <v-row>
+                        <v-col cols="12">
+                          <v-btn-toggle
+                            v-model="config.wakeword.mode"
+                            mandatory
+                            rounded="pill"
+                            color="primary"
+                            variant="flat"
+                            style="background-color: var(--md-sys-color-background); border: 1px solid rgba(0,0,0,0.05);"
+                          >
+                            <v-btn value="openwakeword" class="px-6" style="letter-spacing: 0;">内置模型</v-btn>
+                            <v-btn value="custom" class="px-6" style="letter-spacing: 0;">自定义唤醒词</v-btn>
+                          </v-btn-toggle>
+                        </v-col>
+
+                        <v-col cols="12" md="6">
+                          <v-combobox
+                            v-if="config.wakeword.mode === 'openwakeword'"
+                            v-model="config.wakeword.model"
+                            :items="wakewordModels"
+                            label="内置唤醒词模型"
+                            variant="outlined"
+                            density="comfortable"
+                            hide-details
+                          ></v-combobox>
+                          <v-combobox
+                            v-else
+                            v-model="config.wakeword.custom_name"
+                            :items="customWakewordModels"
+                            label="自定义唤醒词名称"
+                            variant="outlined"
+                            density="comfortable"
+                            hide-details
+                            @update:model-value="refreshWakewordStats"
+                          ></v-combobox>
+                          <p class="text-caption mt-1" style="color: #6b7280;">
+                            内置模型不包含 hey_google，可选 alexa / hey_jarvis / hey_mycroft / hey_rhasspy / timer / weather。
+                          </p>
+                        </v-col>
+                        <v-col cols="12" md="6">
+                          <div class="text-body-2 mb-2" style="color: #49454F;">Threshold (触发阈值): <b>{{ config.wakeword.threshold }}</b></div>
+                          <v-slider v-model="config.wakeword.threshold" min="0.1" max="0.99" step="0.01" color="primary" track-color="primary-container"></v-slider>
+                        </v-col>
+                        <v-col cols="12" md="6">
+                          <div class="text-body-2 mb-2" style="color: #49454F;">Cooldown Seconds (触发冷却): <b>{{ config.wakeword.cooldown_seconds }}</b></div>
+                          <v-slider v-model="config.wakeword.cooldown_seconds" min="0.5" max="6.0" step="0.5" color="primary" track-color="primary-container"></v-slider>
+                        </v-col>
+                        <v-col cols="12" md="6">
+                          <v-switch
+                            v-model="config.wakeword.with_screenshot"
+                            label="唤醒后截图 + 文字"
+                            color="primary"
+                            hide-details
+                          ></v-switch>
+                        </v-col>
+
+                        <v-col cols="12" v-if="config.wakeword.mode === 'custom'">
+                          <div class="d-flex align-center flex-wrap" style="gap: 12px;">
+                            <v-btn color="primary" variant="flat" @click="startWakewordSample('positive')" :disabled="wakewordTraining.recording">
+                              录正样本
+                            </v-btn>
+                            <v-btn color="primary" variant="flat" @click="startWakewordSample('negative')" :disabled="wakewordTraining.recording">
+                              录负样本
+                            </v-btn>
+                            <v-btn variant="text" color="error" @click="stopWakewordSample" :disabled="!wakewordTraining.recording">
+                              停止采样
+                            </v-btn>
+                            <v-btn variant="text" color="primary" @click="refreshWakewordStats">
+                              刷新样本统计
+                            </v-btn>
+                            <v-btn variant="text" color="primary" @click="openSampleManager">
+                              管理样本
+                            </v-btn>
+                          </div>
+                          <div class="text-caption mt-2" style="color: #6b7280;">
+                            正样本: {{ wakewordTraining.positive }} | 负样本: {{ wakewordTraining.negative }}
+                          </div>
+                          <div class="d-flex align-center flex-wrap mt-3" style="gap: 12px;">
+                            <v-btn color="primary" variant="flat" @click="trainWakeword">开始训练</v-btn>
+                            <v-chip v-if="wakewordTraining.status !== 'idle'" color="primary" variant="flat">
+                              {{ wakewordTraining.status }}
+                            </v-chip>
+                            <span class="text-caption" style="color: #6b7280;">{{ wakewordTraining.message }}</span>
+                          </div>
+                          <p class="text-caption mt-2" style="color: #6b7280;">建议正样本 15+，负样本 30+，越多越稳。</p>
+                        </v-col>
+                      </v-row>
+                      <p class="text-caption mt-2" style="color: #6b7280;">启用后将自动禁用热键，唤醒词触发录音。</p>
+                    </div>
+                  </v-expand-transition>
+                </v-card-text>
+              </v-card>
+            </v-col>
+
+            <!-- TTS Section -->
+            <v-col cols="12">
+              <v-card class="md3-card" flat>
+                <v-card-text>
+                  <div class="section-title mb-6">
+                    <span class="material-symbols-outlined">spatial_audio_off</span> TTS
+                  </div>
+                  
+                  <v-row class="mb-2">
+                    <v-col cols="12" md="6">
+                      <v-text-field v-model="config.tts.ref_audio_path" label="主音频参考路径 (主感情参考)" variant="outlined" density="comfortable" hide-details></v-text-field>
+                    </v-col>
+                    <v-col cols="12" md="6">
+                      <v-text-field v-model="config.tts.prompt_text" label="参考提示词 (Prompt Text)" variant="outlined" density="comfortable" hide-details></v-text-field>
+                    </v-col>
+                    <v-col cols="12">
+                      <v-combobox
+                        v-model="config.tts.aux_ref_audio_paths"
+                        label="副参考音频路径 (可填多个，输入路径后按回车添加)"
+                        multiple
+                        chips
+                        closable-chips
+                        variant="outlined"
+                        density="comfortable"
+                        hide-details
+                      ></v-combobox>
+                    </v-col>
+                  </v-row>
+                  
+                  <div class="d-flex align-center justify-space-between mb-4 mt-6">
+                    <h3 class="text-h6 font-weight-medium" style="color: #49454F;">角色卡</h3>
+                    <v-btn variant="text" color="primary" rounded="xl" v-ripple @click="openCharacterDialog" style="text-transform: none; font-weight: bold; letter-spacing: 0;">
+                      <span class="material-symbols-outlined mr-2" style="font-size: 20px !important;">add</span>
+                      另存为角色卡
+                    </v-btn>
+                  </div>
+
+                  <v-row v-if="config.tts.history && config.tts.history.length > 0">
+                    <v-col v-for="(item, i) in config.tts.history" :key="i" cols="6" sm="4" md="3">
+                        <div class="char-card" v-ripple @click="selectCharacter(item)" @contextmenu.prevent>
+                          <span class="material-symbols-outlined mb-2" style="font-size: 36px !important; color: inherit;">face</span>
+                          <div class="text-body-1 font-weight-bold">{{ item.name || '未命名' }}</div>
+                        </div>
+                    </v-col>
+                  </v-row>
+                  <div v-else class="text-center pa-4" style="opacity: 0.5;">
+                    <p>目前没有保存的角色卡。</p>
+                  </div>
+
+                  <v-dialog v-model="characterDialog.show" max-width="420">
+                    <v-card class="md3-card" flat>
+                      <v-card-title class="text-h6">保存角色卡</v-card-title>
+                      <v-card-text>
+                        <v-text-field
+                          v-model="characterDialog.name"
+                          label="角色名称"
+                          variant="outlined"
+                          autofocus
+                        ></v-text-field>
+                      </v-card-text>
+                      <v-card-actions class="justify-end">
+                        <v-btn variant="text" @click="characterDialog.show = false">取消</v-btn>
+                        <v-btn color="primary" variant="flat" @click="confirmSaveCharacter">保存</v-btn>
+                      </v-card-actions>
+                    </v-card>
+                  </v-dialog>
+                </v-card-text>
+              </v-card>
+            </v-col>
+
+            <!-- Advanced TTS Parameters Section -->
+            <v-col cols="12">
+                <v-card class="md3-card pb-4" flat>
+                  <v-card-text>
+                    <div class="section-title">
+                      <span class="material-symbols-outlined">discover_tune</span> 参数微调模块
+                    </div>
+                    <!-- 将所有 config.json 中的 TTS 核心参数彻底暴露 -->
+                    <v-row class="px-2 mt-4">
+                        <v-col cols="12" md="6" class="py-1">
+                          <div class="text-body-2 mb-2" style="color: #49454F;">Volume (音量): <b>{{ config.tts.volume }}</b></div>
+                          <v-slider v-model="config.tts.volume" min="0" max="1" step="0.1" color="primary" track-color="primary-container"></v-slider>
+                        </v-col>
+                        <v-col cols="12" md="6" class="py-1">
+                          <div class="text-body-2 mb-2" style="color: #49454F;">Speed Factor (语速): <b>{{ config.tts.speed_factor }}</b></div>
+                          <v-slider v-model="config.tts.speed_factor" min="0.5" max="2.0" step="0.1" color="primary" track-color="primary-container"></v-slider>
+                        </v-col>
+                        <v-col cols="12" md="6" class="py-1">
+                          <div class="text-body-2 mb-2" style="color: #49454F;">Temperature (发散度): <b>{{ config.tts.temperature }}</b></div>
+                          <v-slider v-model="config.tts.temperature" min="0" max="2.0" step="0.1" color="primary" track-color="primary-container"></v-slider>
+                        </v-col>
+                        <v-col cols="12" md="6" class="py-1">
+                          <div class="text-body-2 mb-2" style="color: #49454F;">Top P (核心采样): <b>{{ config.tts.top_p }}</b></div>
+                          <v-slider v-model="config.tts.top_p" min="0.05" max="1.0" step="0.05" color="primary" track-color="primary-container"></v-slider>
+                        </v-col>
+                        <v-col cols="12" md="6" class="py-1">
+                          <div class="text-body-2 mb-2" style="color: #49454F;">Top K (词表截断): <b>{{ config.tts.top_k }}</b></div>
+                          <v-slider v-model="config.tts.top_k" min="1" max="100" step="1" color="primary" track-color="primary-container"></v-slider>
+                        </v-col>
+                        <v-col cols="12" md="6" class="py-1">
+                          <div class="text-body-2 mb-2" style="color: #49454F;">Repetition Penalty (重复惩罚): <b>{{ config.tts.repetition_penalty }}</b></div>
+                          <v-slider v-model="config.tts.repetition_penalty" min="0.5" max="3.0" step="0.05" color="primary" track-color="primary-container"></v-slider>
+                        </v-col>
+                        <v-col cols="12" md="6" class="py-1">
+                          <div class="text-body-2 mb-2" style="color: #49454F;">Fragment Interval (分片间隔时间): <b>{{ config.tts.fragment_interval }}</b></div>
+                          <v-slider v-model="config.tts.fragment_interval" min="0" max="1.0" step="0.1" color="primary" track-color="primary-container"></v-slider>
+                        </v-col>
+                        <v-col cols="12" md="6" class="py-1">
+                          <div class="text-body-2 mb-2" style="color: #49454F;">Batch Threshold (批处理阈值): <b>{{ config.tts.batch_threshold }}</b></div>
+                          <v-slider v-model="config.tts.batch_threshold" min="0.1" max="1.0" step="0.05" color="primary" track-color="primary-container"></v-slider>
+                        </v-col>
+                        
+                        <!-- Numbers & Selects -->
+                        <v-col cols="12" sm="4" class="py-2">
+                           <v-text-field v-model.number="config.tts.batch_size" type="number" label="Batch Size (批处理大小)" variant="outlined" density="compact" hide-details></v-text-field>
+                        </v-col>
+                        <v-col cols="12" sm="4" class="py-2">
+                           <v-text-field v-model.number="config.tts.sample_steps" type="number" label="Sample Steps (扩散步数)" variant="outlined" density="compact" hide-details></v-text-field>
+                        </v-col>
+                        <v-col cols="12" sm="4" class="py-2">
+                           <v-select v-model="config.tts.text_split_method" :items="['cut3','cut5']" label="Split Method (切句策略)" variant="outlined" density="compact" hide-details></v-select>
+                        </v-col>
+                        
+                        <!-- Boolean Switches -->
+                        <v-col cols="6" sm="3" class="py-0 mt-4">
+                           <v-switch v-model="config.tts.split_bucket" label="Split Bucket (分桶处理)" color="primary" hide-details density="compact"></v-switch>
+                        </v-col>
+                        <v-col cols="6" sm="3" class="py-0 mt-4">
+                           <v-switch v-model="config.tts.parallel_infer" label="Parallel Infer (并行推理)" color="primary" hide-details density="compact"></v-switch>
+                        </v-col>
+                        <v-col cols="6" sm="3" class="py-0 mt-4">
+                           <v-switch v-model="config.tts.super_sampling" label="Super Sampling (超采样)" color="primary" hide-details density="compact"></v-switch>
+                        </v-col>
+                        <v-col cols="6" sm="3" class="py-0 mt-4">
+                           <v-switch v-model="config.tts.streaming_mode" label="Streaming Mode (流式输出)" color="primary" hide-details density="compact"></v-switch>
+                        </v-col>
+                        
+                    </v-row>
+                  </v-card-text>
+                </v-card>
+            </v-col>
+
+          </v-row>
+        </v-container>
+      </v-main>
+      
+      <v-dialog v-model="samplesDialog.show" max-width="500">
+        <v-card class="md3-card" flat>
+          <v-card-title class="text-h6">
+            样本管理: {{ config.wakeword.custom_name || 'shizuku' }}
+          </v-card-title>
+          <v-card-text>
+            <v-tabs v-model="samplesDialog.tab" color="primary">
+              <v-tab value="positive">正样本 ({{ samplesDialog.positive.length }})</v-tab>
+              <v-tab value="negative">负样本 ({{ samplesDialog.negative.length }})</v-tab>
+            </v-tabs>
+            <v-window v-model="samplesDialog.tab" class="mt-4">
+              <v-window-item value="positive">
+                <v-list density="compact">
+                  <v-list-item v-for="(file, i) in samplesDialog.positive" :key="i">
+                    <v-list-item-title>{{ file }}</v-list-item-title>
+                    <template v-slot:append>
+                      <v-btn icon="mdi-delete" variant="text" color="error" size="small" @click="deleteSample('positive', file)"></v-btn>
+                    </template>
+                  </v-list-item>
+                  <div v-if="samplesDialog.positive.length === 0" class="text-center pa-4 text-caption text-grey">暂无样本</div>
+                </v-list>
+              </v-window-item>
+              <v-window-item value="negative">
+                <v-list density="compact">
+                  <v-list-item v-for="(file, i) in samplesDialog.negative" :key="i">
+                    <v-list-item-title>{{ file }}</v-list-item-title>
+                    <template v-slot:append>
+                      <v-btn icon="mdi-delete" variant="text" color="error" size="small" @click="deleteSample('negative', file)"></v-btn>
+                    </template>
+                  </v-list-item>
+                  <div v-if="samplesDialog.negative.length === 0" class="text-center pa-4 text-caption text-grey">暂无样本</div>
+                </v-list>
+              </v-window-item>
+            </v-window>
+          </v-card-text>
+          <v-card-actions class="justify-end">
+            <v-btn color="primary" variant="flat" @click="samplesDialog.show = false">关闭</v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+      <v-snackbar v-model="snackbar.show" :timeout="3000" color="primary" rounded="pill" elevation="3">
+        <span class="font-weight-medium">{{ snackbar.text }}</span>
+      </v-snackbar>
+    </v-app>
+  </div>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vuetify@3.3.15/dist/vuetify.min.js"></script>
+  <script>
+    const { createApp, ref, onMounted, watch } = Vue;
+    const { createVuetify } = Vuetify;
+
+    // Google Material Design 3 Configuration payload (Light Blue theme)
+    const vuetify = createVuetify({
+      theme: {
+        defaultTheme: 'light',
+        themes: {
+          light: {
+            colors: {
+              primary: '#00639B',
+              'on-primary': '#FFFFFF',
+              'primary-container': '#CDE5FF',
+              'on-primary-container': '#001D33',
+              surface: '#FAFCFF',
+              'on-surface': '#1A1C1E',
+              background: '#F2F7FC',
+              'on-background': '#1A1C1E',
+            }
+          }
+        }
+      },
+      defaults: {
+        VCard: { ripple: false },
+        VBtn: { 
+          style: 'text-transform: none; letter-spacing: 0;'
+        }
+      }
+    });
+
+    const app = createApp({
+      setup() {
+        const config = ref({
+            provider: '', model: '',
+            system_prompt: '',
+            stt: { provider: 'local', local: {}, groq: {} },
+            recording: {
+              device_index: null,
+              vad: {
+                enabled: true,
+                silence_seconds: 1.2,
+                min_record_seconds: 0.8,
+                aggressiveness: 2,
+                frame_ms: 30
+              }
+            },
+            wakeword: {
+              enabled: false,
+              mode: 'openwakeword',
+              model: 'hey_jarvis',
+              custom_name: 'shizuku',
+              threshold: 0.6,
+              cooldown_seconds: 2.5,
+              record_seconds: 6,
+              with_screenshot: false
+            },
+            tts: { 
+              ref_audio_path: '', aux_ref_audio_paths: [], prompt_text: '', history: [],
+              volume: 0.1, speed_factor: 1.0, temperature: 1.0, top_p: 1.0, top_k: 30, repetition_penalty: 1.35,
+              text_split_method: 'cut3', batch_size: 30, batch_threshold: 0.75, split_bucket: true, sample_steps: 32, fragment_interval: 0.3,
+              parallel_infer: true, super_sampling: false, streaming_mode: false
+            }
+        });
+
+        const record = ref({
+            mode: 'text',
+            isRecording: false,
+            busy: false
+        });
+
+        const characterDialog = ref({ show: false, name: '' });
+        const wakewordTraining = ref({
+          status: 'idle',
+          message: '',
+          positive: 0,
+          negative: 0,
+          recording: false,
+          recordingLabel: ''
+        });
+        const audioDevices = ref([]);
+        
+        const snackbar = ref({ show: false, text: '' });
+        const llmProviders = ['ollama', 'gemini', 'openai_compat', 'deepseek'];
+        const wakewordModels = ref([]);
+        const customWakewordModels = ref([]);
+        const samplesDialog = ref({ show: false, tab: 'positive', positive: [], negative: [] });
+
+        const loadConfig = async () => {
+            const res = await fetch('/api/config');
+            if (res.ok) {
+                const data = await res.json();
+                if (!data.tts.history) data.tts.history = [];
+                // merge into current ref to maintain reactive properties nicely
+                Object.assign(config.value, data);
+                if (!config.value.recording) {
+                  config.value.recording = { device_index: null, vad: { enabled: true, silence_seconds: 1.2, min_record_seconds: 0.8, aggressiveness: 2, frame_ms: 30 } };
+                }
+                if (!config.value.recording.vad) {
+                  config.value.recording.vad = { enabled: true, silence_seconds: 1.2, min_record_seconds: 0.8, aggressiveness: 2, frame_ms: 30 };
+                }
+                if (typeof config.value.recording.device_index !== 'number') {
+                  config.value.recording.device_index = null;
+                }
+                if (!config.value.wakeword) {
+                  config.value.wakeword = { enabled: false, mode: 'openwakeword', model: 'hey_jarvis', custom_name: 'shizuku', threshold: 0.6, cooldown_seconds: 2.5, record_seconds: 6, with_screenshot: false };
+                }
+                if (!config.value.wakeword.mode) {
+                  config.value.wakeword.mode = 'openwakeword';
+                }
+                if (!config.value.wakeword.custom_name) {
+                  config.value.wakeword.custom_name = 'shizuku';
+                }
+            }
+        };
+
+        const loadWakewordModels = async () => {
+            const res = await fetch('/api/wakeword/models');
+            if (!res.ok) return;
+            const data = await res.json();
+            if (Array.isArray(data.models)) {
+              wakewordModels.value = data.models;
+            }
+          };
+
+        const loadCustomWakewordModels = async () => {
+            const res = await fetch('/api/wakeword/custom_models');
+            if (!res.ok) return;
+            const data = await res.json();
+            if (Array.isArray(data.models)) {
+              customWakewordModels.value = data.models;
+            }
+        };
+
+        const loadAudioDevices = async () => {
+          const res = await fetch('/api/audio/devices');
+          if (!res.ok) return;
+          const data = await res.json();
+          if (Array.isArray(data.devices)) {
+            audioDevices.value = data.devices.map((item) => ({
+              index: item.index,
+              name: item.isDefault ? `${item.name} (默认)` : item.name
+            }));
+          }
+        };
+
+          const refreshWakewordStats = async () => {
+            const name = config.value.wakeword.custom_name || 'shizuku';
+            const res = await fetch(`/api/wakeword/samples/stats?name=${encodeURIComponent(name)}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            wakewordTraining.value.positive = data.positive || 0;
+            wakewordTraining.value.negative = data.negative || 0;
+          };
+
+          const refreshWakewordTrainingStatus = async () => {
+            const res = await fetch('/api/wakeword/train/status');
+            if (!res.ok) return;
+            const data = await res.json();
+            wakewordTraining.value.status = data.status || 'idle';
+            wakewordTraining.value.message = data.message || '';
+            if (wakewordTraining.value.status === 'running') {
+              setTimeout(refreshWakewordTrainingStatus, 1000);
+            } else if (wakewordTraining.value.status === 'done') {
+              loadCustomWakewordModels();
+            }
+          };
+
+          const openSampleManager = async () => {
+            const name = config.value.wakeword.custom_name || 'shizuku';
+            const res = await fetch(`/api/wakeword/samples/list?name=${encodeURIComponent(name)}`);
+            if (res.ok) {
+              const data = await res.json();
+              samplesDialog.value.positive = data.positive || [];
+              samplesDialog.value.negative = data.negative || [];
+              samplesDialog.value.show = true;
+            }
+          };
+
+          const deleteSample = async (label, filename) => {
+            const name = config.value.wakeword.custom_name || 'shizuku';
+            const res = await fetch('/api/wakeword/samples/delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name, label, filename })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.status === 'success') {
+                snackbar.value = { show: true, text: '删除成功' };
+                if (label === 'positive') {
+                  samplesDialog.value.positive = samplesDialog.value.positive.filter(f => f !== filename);
+                } else {
+                  samplesDialog.value.negative = samplesDialog.value.negative.filter(f => f !== filename);
+                }
+                refreshWakewordStats();
+              } else {
+                snackbar.value = { show: true, text: data.message || '删除失败' };
+              }
+            }
+          };
+
+          const startWakewordSample = async (label) => {
+            if (wakewordTraining.value.recording) return;
+            const name = config.value.wakeword.custom_name || 'shizuku';
+            const res = await fetch('/api/wakeword/samples/start', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name, label })
+            });
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.status === 'recording') {
+              wakewordTraining.value.recording = true;
+              wakewordTraining.value.recordingLabel = label;
+              snackbar.value = { show: true, text: `正在录制${label === 'positive' ? '正样本' : '负样本'}` };
+            } else if (data.message) {
+              snackbar.value = { show: true, text: data.message };
+            }
+          };
+
+          const stopWakewordSample = async () => {
+            const res = await fetch('/api/wakeword/samples/stop', { method: 'POST' });
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.status === 'stopped') {
+              wakewordTraining.value.recording = false;
+              wakewordTraining.value.recordingLabel = '';
+              snackbar.value = { show: true, text: '样本录制完成' };
+              refreshWakewordStats();
+            }
+          };
+
+          const trainWakeword = async () => {
+            const name = config.value.wakeword.custom_name || 'shizuku';
+            const res = await fetch('/api/wakeword/train', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name, window_seconds: 1.5 })
+            });
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.status === 'running') {
+              snackbar.value = { show: true, text: '训练已开始' };
+              refreshWakewordTrainingStatus();
+            } else if (data.message) {
+              snackbar.value = { show: true, text: data.message };
+            }
+          };
+
+        const saveConfig = async () => {
+            try {
+                await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config.value)
+                });
+                snackbar.value = { show: true, text: '配置已成功保存！' };
+            } catch (e) {
+                snackbar.value = { show: true, text: '保存失败！' };
+            }
+        };
+
+        const fetchRecordStatus = async () => {
+          const res = await fetch('/api/record/status');
+          if (!res.ok) return;
+          const data = await res.json();
+          record.value.isRecording = !!data.is_recording;
+          if (record.value.isRecording) {
+            record.value.mode = data.pending_screenshot ? 'screenshot' : 'text';
+          }
+        };
+
+        const toggleRecording = async () => {
+          if (record.value.busy) return;
+          record.value.busy = true;
+          try {
+            const res = await fetch('/api/record/toggle', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ with_screenshot: record.value.mode === 'screenshot' })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              record.value.isRecording = !!data.is_recording;
+              if (record.value.isRecording) {
+                record.value.mode = data.pending_screenshot ? 'screenshot' : 'text';
+                snackbar.value = { show: true, text: '开始录音' };
+              } else {
+                snackbar.value = { show: true, text: '录音结束，开始处理' };
+              }
+            }
+          } catch (e) {
+            snackbar.value = { show: true, text: '录音操作失败！' };
+          } finally {
+            record.value.busy = false;
+          }
+        };
+
+        const cancelRecording = async () => {
+          if (!record.value.isRecording) return;
+          try {
+            const res = await fetch('/api/record/cancel', { method: 'POST' });
+            if (res.ok) {
+              const data = await res.json();
+              record.value.isRecording = !!data.is_recording;
+              snackbar.value = { show: true, text: '已丢弃当前录音' };
+            }
+          } catch (e) {
+            snackbar.value = { show: true, text: '丢弃失败！' };
+          }
+        };
+
+        const clearHistory = async () => {
+          try {
+            await fetch('/api/record/clear', { method: 'POST' });
+            snackbar.value = { show: true, text: '历史已清空' };
+          } catch (e) {
+            snackbar.value = { show: true, text: '清空失败！' };
+          }
+        };
+
+        const openCharacterDialog = () => {
+          characterDialog.value = { show: true, name: '' };
+        };
+
+        const confirmSaveCharacter = () => {
+          const name = (characterDialog.value.name || '').trim();
+          if (!name) {
+            snackbar.value = { show: true, text: '请输入角色名称' };
+            return;
+          }
+          config.value.tts.history.push({
+            name: name,
+            path: config.value.tts.ref_audio_path,
+            aux_paths: [...(config.value.tts.aux_ref_audio_paths || [])],
+            text: config.value.tts.prompt_text
+          });
+          characterDialog.value.show = false;
+          saveConfig();
+        };
+
+        const selectCharacter = (item) => {
+            config.value.tts.ref_audio_path = item.path;
+            config.value.tts.aux_ref_audio_paths = item.aux_paths || [];
+            config.value.tts.prompt_text = item.text;
+            snackbar.value = { show: true, text: `预设已切换至 [${item.name}]` };
+        };
+
+        onMounted(() => {
+          loadConfig();
+          fetchRecordStatus();
+          loadWakewordModels();
+          loadCustomWakewordModels();
+          loadAudioDevices();
+          refreshWakewordStats();
+          refreshWakewordTrainingStatus();
+        });
+
+        // Add a small helper to format labels (e.g. Whispers vs local provider values if needed)
+        // But since we bind directly to 'local', vuetify btn-toggle handles it perfectly.
+
+        return {
+          config,
+          llmProviders,
+          wakewordModels,
+          customWakewordModels,
+          audioDevices,
+          snackbar,
+          record,
+          samplesDialog,
+          wakewordTraining,
+          saveConfig,
+          openCharacterDialog,
+          confirmSaveCharacter,
+          characterDialog,
+          selectCharacter,
+          toggleRecording,
+          cancelRecording,
+          clearHistory,
+          refreshWakewordStats,
+          openSampleManager,
+          deleteSample,
+          refreshWakewordTrainingStatus,
+          startWakewordSample,
+          stopWakewordSample,
+          trainWakeword
+        };
+      }
+    });
+
+    app.use(vuetify).mount('#app');
+  </script>
+</body>
+</html>

@@ -1,7 +1,10 @@
-# Local runtime outputs
+# Local runtime outputs (includes recordings, history, wakeword samples)
 outputs/
 history.txt
 screenshot/
+
+# Character persona / system prompt (private)
+set.txt
 
 # Python caches and bytecode
 __pycache__/

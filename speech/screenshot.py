@@ -76,31 +76,6 @@ def _normalize_screen_config(data):
     return config
 
 
-def _prompt_monitor_index(config):
-    if mss is None:
-        print("[warning] 未安装 mss，无法列出多屏，默认截图为全屏。")
-        return config
-
-    with mss.mss() as sct:
-        monitors = sct.monitors[1:]
-
-    if not monitors:
-        print("[warning] 未检测到屏幕信息，默认截图为全屏。")
-        return config
-
-    default_index = config.get("monitor_index", 1)
-    print("[setup] 可用屏幕：")
-    for idx, mon in enumerate(monitors, start=1):
-        print(f"  {idx}) {mon['width']}x{mon['height']} ({mon['left']},{mon['top']})")
-
-    value = input(f"选择默认截图屏幕 (回车使用默认: {default_index})\n> ").strip()
-    if value.isdigit():
-        choice = int(value)
-        if 1 <= choice <= len(monitors):
-            config["monitor_index"] = choice
-    return config
-
-
 def load_screen_config(output_dir=Path("outputs")):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -111,7 +86,6 @@ def load_screen_config(output_dir=Path("outputs")):
     config = _normalize_screen_config(raw)
 
     if not has_existing_file:
-        config = _prompt_monitor_index(config)
         _save_json(config_path, config)
 
     return config

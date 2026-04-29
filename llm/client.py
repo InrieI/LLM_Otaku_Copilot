@@ -6,7 +6,7 @@ __all__ = ["LLMConfig", "load_config", "list_ollama_models", "generate", "genera
 
 
 if __name__ == "__main__":
-    cfg = load_config(interactive=True)
+    cfg = load_config()
     print(f"[system] 使用提供商: {cfg.provider}")
     print(f"[system] 使用模型: {cfg.model}")
     print()

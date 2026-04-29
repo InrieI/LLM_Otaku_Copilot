@@ -1,4 +1,6 @@
 from llm.providers import (
+    generate_deepseek,
+    generate_deepseek_messages,
     generate_gemini,
     generate_ollama,
     generate_openai_compat,
@@ -13,6 +15,8 @@ def generate(prompt, config):
         return generate_ollama(prompt, config)
     if provider in {"openai", "openai_compat", "api"}:
         return generate_openai_compat(prompt, config)
+    if provider == "deepseek":
+        return generate_deepseek(prompt, config)
     if provider == "gemini":
         return generate_gemini(prompt, config)
 
@@ -24,6 +28,8 @@ def generate_chat(messages, config, temperature=0.7):
 
     if provider in {"openai", "openai_compat", "api"}:
         return generate_openai_compat_messages(messages, config, temperature)
+    if provider == "deepseek":
+        return generate_deepseek_messages(messages, config, temperature)
 
     prompt = messages_to_prompt(messages)
     if provider == "ollama":

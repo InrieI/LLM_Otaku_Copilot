@@ -226,20 +226,36 @@
           console.warn('[live2d] Could not enumerate parameters:', e);
         }
 
+        // === Log available expressions and motions for debugging ===
+        try {
+          const settings = model.internalModel.settings;
+          const exprs = settings.expressions ? settings.expressions.map(e => e.Name || e.name || e.file) : 'none';
+          const motions = settings.motions ? Object.keys(settings.motions) : 'none';
+          console.log('[live2d] Expressions:', exprs);
+          console.log('[live2d] Motions groups:', motions);
+        } catch (e) {}
+
         // === Hook into model update for proper lip sync timing ===
         // The key: we must set mouth param AFTER motionManager.update() runs,
         // otherwise idle motions will overwrite our value every frame.
+        // And then we MUST call coreModel.update() again to apply the new parameter to vertices.
         const origUpdate = model.internalModel.update.bind(model.internalModel);
         model.internalModel.update = function(dt, now) {
           origUpdate(dt, now);
-          // Apply lip sync value AFTER all motion/physics updates
+          
+          let modified = false;
           if (isSpeaking && mouthValueForTicker > 0) {
             const p = detectMouthParam();
             if (p) {
               try {
                 this.coreModel.setParameterValueById(p, mouthValueForTicker);
+                modified = true;
               } catch (e) {}
             }
+          }
+          
+          if (modified && typeof this.coreModel.update === 'function') {
+            this.coreModel.update();
           }
         };
 

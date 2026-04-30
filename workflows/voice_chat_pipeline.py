@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import re
 import threading
 import time
 
@@ -15,6 +16,21 @@ from tts.player import apply_volume_wav, play_audio
 
 
 SYSTEM_PROMPT = "你的名字是汐，是一个慵懒且有点三无的15岁少女，你和用户是朋友关系。你不需要对他使用敬语，可以对他开玩笑互损，说话要简短，要直白，像是正常朋友之间的交流，且不许在对话中使用括号进行动作神态等的描写例如“（打了个哈欠）我在呢”"
+
+# Emotion tags the LLM can include in responses
+EMOTION_PATTERN = re.compile(r'\[(\w+)\]')
+KNOWN_EMOTIONS = {'neutral', 'joy', 'sadness', 'anger', 'surprise', 'fear', 'disgust', 'smirk'}
+
+
+def extract_emotion(text):
+    """Extract the first emotion tag from text and return (clean_text, emotion)."""
+    match = EMOTION_PATTERN.search(text)
+    if match:
+        tag = match.group(1).lower()
+        if tag in KNOWN_EMOTIONS:
+            clean = text[:match.start()] + text[match.end():]
+            return clean.strip(), tag
+    return text, 'neutral'
 
 
 class VoiceChatWorkflow:
@@ -218,14 +234,44 @@ class VoiceChatWorkflow:
         if not reply:
             return
 
-        self.history_store.append("assistant", reply)
-        self.last_reply_text_path.write_text(reply, encoding="utf-8")
+        # Extract emotion tag from LLM reply (e.g. "[joy] 哈哈好的" → emotion=joy, clean_reply="哈哈好的")
+        clean_reply, emotion = extract_emotion(reply)
 
-        audio_path = synthesize_tts(reply, self.tts_config, self.last_reply_audio_path)
+        self.history_store.append("assistant", reply)
+        self.last_reply_text_path.write_text(clean_reply, encoding="utf-8")
+
+        # Update Live2D state for the frontend display page
+        try:
+            from web_app import live2d_state
+            live2d_state["emotion"] = emotion
+            live2d_state["reply_text"] = clean_reply
+        except Exception:
+            pass
+
+        audio_path = synthesize_tts(clean_reply, self.tts_config, self.last_reply_audio_path)
         if audio_path:
             adjusted_path = apply_volume_wav(
                 audio_path,
                 self.tts_config.get("volume", 1.0),
                 self.last_reply_scaled_audio_path,
             )
-            play_audio(adjusted_path)
+
+            # Notify Live2D frontend that new audio is available
+            try:
+                from web_app import live2d_state
+                live2d_state["audio_version"] = live2d_state.get("audio_version", 0) + 1
+            except Exception:
+                pass
+
+            # Check if browser audio is enabled (Live2D page handles playback)
+            browser_audio = False
+            try:
+                cfg_path = Path(__file__).resolve().parents[1] / "config.json"
+                if cfg_path.exists():
+                    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+                    browser_audio = cfg.get("live2d", {}).get("browser_audio", False)
+            except Exception:
+                pass
+
+            if not browser_audio:
+                play_audio(adjusted_path)

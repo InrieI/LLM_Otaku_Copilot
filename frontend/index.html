@@ -138,7 +138,7 @@
     <v-app>
       <v-app-bar flat height="80">
         <v-container class="d-flex align-center">
-          <v-toolbar-title class="ml-2"><b>OtakuWifu</b></v-toolbar-title>
+          <v-toolbar-title class="ml-2"><b>OtakuCopilot</b></v-toolbar-title>
           <v-spacer></v-spacer>
           <v-btn class="md3-fab" @click="saveConfig" v-ripple>
             <span class="material-symbols-outlined mr-2">save</span>
@@ -579,6 +579,48 @@
                   </v-card-text>
                 </v-card>
             </v-col>
+            <!-- Live2D Section -->
+            <v-col cols="12">
+              <v-card class="md3-card" flat>
+                <v-card-text>
+                  <div class="section-title">
+                    <span class="material-symbols-outlined">face</span> Live2D
+                  </div>
+
+                  <v-row>
+                    <v-col cols="12" md="6">
+                      <v-select
+                        v-model="config.live2d.model_name"
+                        :items="live2dModels"
+                        item-title="name"
+                        item-value="name"
+                        label="Live2D 模型"
+                        variant="outlined"
+                        density="comfortable"
+                        hide-details
+                        no-data-text="请将模型放入 live2d-models/ 目录"
+                      ></v-select>
+                      <p class="text-caption mt-1" style="color: #6b7280;">将模型文件夹放入项目根目录下的 live2d-models/ 目录。</p>
+                    </v-col>
+                    <v-col cols="12" md="6">
+                      <v-switch
+                        v-model="config.live2d.browser_audio"
+                        label="浏览器端播放音频 (用于口型同步)"
+                        color="primary"
+                        hide-details
+                      ></v-switch>
+                      <p class="text-caption mt-1" style="color: #6b7280;">开启后 TTS 音频将由 Live2D 页面播放并驱动口型，本地不再播放。</p>
+                    </v-col>
+                    <v-col cols="12">
+                      <v-btn color="primary" variant="flat" @click="openLive2DPage">
+                        <span class="material-symbols-outlined mr-2" style="font-size: 20px !important;">open_in_new</span>
+                        打开 Live2D 页面
+                      </v-btn>
+                    </v-col>
+                  </v-row>
+                </v-card-text>
+              </v-card>
+            </v-col>
 
           </v-row>
         </v-container>
@@ -695,6 +737,10 @@
               volume: 0.1, speed_factor: 1.0, temperature: 1.0, top_p: 1.0, top_k: 30, repetition_penalty: 1.35,
               text_split_method: 'cut3', batch_size: 30, batch_threshold: 0.75, split_bucket: true, sample_steps: 32, fragment_interval: 0.3,
               parallel_infer: true, super_sampling: false, streaming_mode: false
+            },
+            live2d: {
+              model_name: '',
+              browser_audio: false
             }
         });
 
@@ -719,6 +765,7 @@
         const llmProviders = ['ollama', 'gemini', 'openai_compat', 'deepseek'];
         const wakewordModels = ref([]);
         const customWakewordModels = ref([]);
+        const live2dModels = ref([]);
         const samplesDialog = ref({ show: false, tab: 'positive', positive: [], negative: [] });
 
         const loadConfig = async () => {
@@ -746,7 +793,23 @@
                 if (!config.value.wakeword.custom_name) {
                   config.value.wakeword.custom_name = 'shizuku';
                 }
+                if (!config.value.live2d) {
+                  config.value.live2d = { model_name: '', browser_audio: false };
+                }
             }
+        };
+
+        const loadLive2DModels = async () => {
+            try {
+              const res = await fetch('/api/live2d/models');
+              if (!res.ok) return;
+              const data = await res.json();
+              live2dModels.value = data.models || [];
+            } catch (e) { /* ignore */ }
+        };
+
+        const openLive2DPage = () => {
+            window.open('/live2d', '_blank');
         };
 
         const loadWakewordModels = async () => {
@@ -990,6 +1053,7 @@
           loadAudioDevices();
           refreshWakewordStats();
           refreshWakewordTrainingStatus();
+          loadLive2DModels();
         });
 
         // Add a small helper to format labels (e.g. Whispers vs local provider values if needed)
@@ -1019,7 +1083,9 @@
           refreshWakewordTrainingStatus,
           startWakewordSample,
           stopWakewordSample,
-          trainWakeword
+          trainWakeword,
+          live2dModels,
+          openLive2DPage
         };
       }
     });

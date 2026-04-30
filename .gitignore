@@ -6,6 +6,9 @@ screenshot/
 # Character persona / system prompt (private)
 set.txt
 
+# Live2D models (large binary, user-specific)
+live2d-models/
+
 # Python caches and bytecode
 __pycache__/
 *.py[cod]

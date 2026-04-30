@@ -43,14 +43,105 @@ wakeword_dataset_dir = outputs_dir / "wakeword_dataset"
 wakeword_models_dir = outputs_dir / "wakeword_models"
 wakeword_training_state = {"status": "idle", "message": "", "name": ""}
 wakeword_sample_state = {"path": None, "label": None, "name": None}
+live2d_models_dir = Path(__file__).resolve().parent / "live2d-models"
+live2d_state = {"emotion": "neutral", "reply_text": "", "audio_version": 0}
 
 # Serve static files for frontend
 app.mount("/static", StaticFiles(directory=str(frontend_dir)), name="static")
+
+# Serve Live2D model files
+if live2d_models_dir.exists():
+    app.mount("/live2d-models", StaticFiles(directory=str(live2d_models_dir)), name="live2d-models")
 
 @app.get("/", response_class=HTMLResponse)
 async def get_index():
     with open(frontend_dir / "index.html", "r", encoding="utf-8") as f:
         return f.read()
+
+
+@app.get("/live2d", response_class=HTMLResponse)
+async def get_live2d():
+    live2d_html = frontend_dir / "live2d.html"
+    if not live2d_html.exists():
+        return HTMLResponse("<h1>live2d.html not found</h1>", status_code=404)
+    with open(live2d_html, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def _scan_live2d_models():
+    """Scan live2d-models/ for .model3.json files and return model configs."""
+    models = []
+    if not live2d_models_dir.exists():
+        return models
+    for child in sorted(live2d_models_dir.iterdir()):
+        if not child.is_dir():
+            continue
+        # Search for .model3.json recursively (may be in subfolders like runtime/)
+        model3_files = list(child.rglob("*.model3.json"))
+        if not model3_files:
+            continue
+        model3_path = model3_files[0]
+        rel_path = model3_path.relative_to(live2d_models_dir)
+        url = f"/live2d-models/{rel_path.as_posix()}"
+        models.append({
+            "name": child.name,
+            "url": url,
+            "kScale": 0.3,
+            "initialXshift": 0,
+            "initialYshift": 0,
+            "idleMotionGroupName": "Idle",
+            "emotionMap": {
+                "neutral": 0, "joy": 3, "sadness": 1,
+                "anger": 2, "surprise": 3, "fear": 1,
+                "disgust": 2, "smirk": 3
+            },
+        })
+    return models
+
+
+@app.get("/api/live2d/models")
+async def live2d_models():
+    models = _scan_live2d_models()
+    # Check config for selected model and overrides
+    selected_name = None
+    overrides = {}
+    if config_path.exists():
+        try:
+            cfg = json.loads(config_path.read_text(encoding="utf-8"))
+            l2d_cfg = cfg.get("live2d", {})
+            selected_name = l2d_cfg.get("model_name")
+            overrides = l2d_cfg.get("model_overrides", {})
+        except Exception:
+            pass
+    # Apply overrides and find current
+    current = None
+    for m in models:
+        if m["name"] in overrides:
+            m.update(overrides[m["name"]])
+        if m["name"] == selected_name:
+            current = m
+    if current is None and models:
+        current = models[0]
+    return {"models": models, "current": current}
+
+
+@app.get("/api/live2d/state")
+async def live2d_get_state():
+    return live2d_state
+
+
+@app.get("/api/live2d/audio")
+async def live2d_audio():
+    audio_path = outputs_dir / "latest_reply_scaled.wav"
+    if not audio_path.exists():
+        audio_path = outputs_dir / "latest_reply.wav"
+    if not audio_path.exists():
+        return {"error": "no audio"}
+    return FileResponse(
+        path=str(audio_path),
+        media_type="audio/wav",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 @app.get("/api/config")
 async def get_config():

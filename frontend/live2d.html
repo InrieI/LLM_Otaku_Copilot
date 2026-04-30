@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OtakuCopilot — Live2D</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0d1117; font-family: 'Noto Sans SC', sans-serif; }
+
+    #live2d-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+
+    /* ── Subtitle overlay ── */
+    #subtitle-wrap {
+      position: fixed; bottom: 48px; left: 50%; transform: translateX(-50%);
+      z-index: 100; max-width: 80%; pointer-events: none; text-align: center;
+    }
+    #subtitle {
+      display: inline-block; padding: 12px 28px; border-radius: 16px;
+      background: rgba(0,0,0,0.65); backdrop-filter: blur(12px);
+      color: #f0f0f0; font-size: 18px; line-height: 1.6; letter-spacing: 0.3px;
+      opacity: 0; transition: opacity 0.4s ease;
+    }
+    #subtitle.visible { opacity: 1; }
+
+    /* ── Emotion badge ── */
+    #emotion-badge {
+      position: fixed; top: 20px; right: 24px; z-index: 100;
+      padding: 6px 18px; border-radius: 20px;
+      background: rgba(0,200,150,0.2); backdrop-filter: blur(8px);
+      color: #66ffcc; font-size: 14px; font-weight: 500; letter-spacing: 1px;
+      opacity: 0; transition: opacity 0.3s ease;
+    }
+    #emotion-badge.visible { opacity: 1; }
+
+    /* ── Status indicator ── */
+    #status {
+      position: fixed; top: 20px; left: 24px; z-index: 100;
+      padding: 4px 14px; border-radius: 12px; font-size: 12px;
+      background: rgba(0,0,0,0.4); color: #888; backdrop-filter: blur(6px);
+    }
+    #status.connected { color: #66ffcc; }
+    #status.speaking  { color: #ffaa44; }
+  </style>
+</head>
+<body>
+  <canvas id="live2d-canvas"></canvas>
+  <div id="subtitle-wrap"><div id="subtitle"></div></div>
+  <div id="emotion-badge"></div>
+  <div id="status">connecting...</div>
+
+  <!-- Live2D Cubism 4 Core (must load first) -->
+  <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"></script>
+  <!-- PixiJS v6 (compatible with pixi-live2d-display) -->
+  <script src="https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js"></script>
+  <!-- pixi-live2d-display (Cubism 4) -->
+  <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js"></script>
+
+  <script>
+    // ============================================================
+    //  Global state
+    // ============================================================
+    let pixiApp = null;
+    let currentModel = null;
+    let audioContext = null;
+    let analyserNode = null;
+    let lastAudioVersion = 0;
+    let isSpeaking = false;
+    let currentEmotion = 'neutral';
+    let modelConfig = null;
+
+    const subtitleEl  = document.getElementById('subtitle');
+    const emotionEl   = document.getElementById('emotion-badge');
+    const statusEl    = document.getElementById('status');
+
+    // Default emotion → expression index mapping (overridden by model config)
+    const DEFAULT_EMOTION_MAP = {
+      neutral: 0, joy: 3, sadness: 1, anger: 2,
+      surprise: 3, fear: 1, disgust: 2, smirk: 3
+    };
+
+    // ============================================================
+    //  1. Initialize PixiJS
+    // ============================================================
+    function initPixi() {
+      const canvas = document.getElementById('live2d-canvas');
+      pixiApp = new PIXI.Application({
+        view: canvas,
+        resizeTo: window,
+        backgroundAlpha: 0,  // transparent background
+        antialias: true,
+        autoDensity: true,
+        resolution: window.devicePixelRatio || 1,
+      });
+    }
+
+    // ============================================================
+    //  2. Load Live2D Model
+    // ============================================================
+    async function loadModel(modelUrl, config) {
+      if (currentModel) {
+        pixiApp.stage.removeChild(currentModel);
+        currentModel.destroy();
+        currentModel = null;
+      }
+
+      try {
+        const model = await PIXI.live2d.Live2DModel.from(modelUrl, {
+          autoInteract: false,
+        });
+
+        // Apply scale and position
+        const scale = config.kScale || 0.3;
+        model.scale.set(scale);
+        model.anchor.set(0.5, 0.5);
+        model.x = pixiApp.screen.width / 2 + (config.initialXshift || 0);
+        model.y = pixiApp.screen.height / 2 + (config.initialYshift || 0);
+
+        // Enable mouse tracking (eyes follow cursor)
+        model.interactive = true;
+        pixiApp.stage.addChild(model);
+        currentModel = model;
+
+        // Start idle motion if defined
+        const idleGroup = config.idleMotionGroupName || 'Idle';
+        try { model.motion(idleGroup, 0, 'idle'); } catch (e) { /* no idle motion */ }
+
+        statusEl.textContent = 'connected';
+        statusEl.className = 'connected';
+        console.log('[live2d] Model loaded:', modelUrl);
+      } catch (err) {
+        statusEl.textContent = 'model error';
+        console.error('[live2d] Failed to load model:', err);
+      }
+    }
+
+    // ============================================================
+    //  3. Mouse Tracking (eye follow)
+    // ============================================================
+    function setupMouseTracking() {
+      window.addEventListener('mousemove', (e) => {
+        if (!currentModel) return;
+        // pixi-live2d-display expects focus point in model-local coords
+        const rect = pixiApp.view.getBoundingClientRect();
+        currentModel.focus(e.clientX - rect.left, e.clientY - rect.top);
+      });
+    }
+
+    // ============================================================
+    //  4. Lip Sync (Audio amplitude → ParamMouthOpenY)
+    // ============================================================
+    function ensureAudioContext() {
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyserNode = audioContext.createAnalyser();
+        analyserNode.fftSize = 256;
+        analyserNode.smoothingTimeConstant = 0.6;
+      }
+    }
+
+    async function playAudioWithLipSync(audioUrl) {
+      ensureAudioContext();
+      if (audioContext.state === 'suspended') await audioContext.resume();
+
+      try {
+        const response = await fetch(audioUrl);
+        const arrayBuffer = await response.arrayBuffer();
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+        const source = audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(analyserNode);
+        analyserNode.connect(audioContext.destination);
+
+        isSpeaking = true;
+        statusEl.textContent = 'speaking';
+        statusEl.className = 'speaking';
+        source.start(0);
+
+        // Start lip sync loop
+        const dataArray = new Uint8Array(analyserNode.frequencyBinCount);
+        let smoothedValue = 0;
+
+        function updateMouth() {
+          if (!isSpeaking || !currentModel) return;
+
+          analyserNode.getByteFrequencyData(dataArray);
+          // Use average of lower frequencies (voice band)
+          let sum = 0;
+          const voiceBand = Math.min(32, dataArray.length);
+          for (let i = 0; i < voiceBand; i++) sum += dataArray[i];
+          let rawValue = (sum / voiceBand) / 255;
+
+          // Smooth with lerp to avoid jittery movement
+          smoothedValue += (rawValue - smoothedValue) * 0.35;
+          const mouthOpen = Math.min(1, smoothedValue * 1.8);
+
+          try {
+            const coreModel = currentModel.internalModel.coreModel;
+            coreModel.setParameterValueById('ParamMouthOpenY', mouthOpen);
+          } catch (e) { /* parameter might not exist */ }
+
+          requestAnimationFrame(updateMouth);
+        }
+        requestAnimationFrame(updateMouth);
+
+        source.onended = () => {
+          isSpeaking = false;
+          statusEl.textContent = 'connected';
+          statusEl.className = 'connected';
+          // Close mouth
+          try {
+            const coreModel = currentModel.internalModel.coreModel;
+            coreModel.setParameterValueById('ParamMouthOpenY', 0);
+          } catch (e) {}
+          source.disconnect();
+        };
+      } catch (err) {
+        console.error('[live2d] Audio playback error:', err);
+        isSpeaking = false;
+      }
+    }
+
+    // ============================================================
+    //  5. Expression / Emotion system
+    // ============================================================
+    function applyEmotion(emotion) {
+      if (!currentModel || emotion === currentEmotion) return;
+      currentEmotion = emotion;
+
+      emotionEl.textContent = emotion;
+      emotionEl.className = 'visible';
+      setTimeout(() => { emotionEl.className = ''; }, 3000);
+
+      const emotionMap = (modelConfig && modelConfig.emotionMap) || DEFAULT_EMOTION_MAP;
+      const exprIndex = emotionMap[emotion.toLowerCase()];
+      if (exprIndex !== undefined && exprIndex !== null) {
+        try { currentModel.expression(exprIndex); } catch (e) {
+          console.warn('[live2d] Expression not available:', exprIndex);
+        }
+      }
+    }
+
+    // ============================================================
+    //  6. Subtitle display
+    // ============================================================
+    function showSubtitle(text) {
+      if (!text) {
+        subtitleEl.className = '';
+        return;
+      }
+      subtitleEl.textContent = text;
+      subtitleEl.className = 'visible';
+    }
+
+    // ============================================================
+    //  7. Backend state polling
+    // ============================================================
+    async function pollState() {
+      try {
+        const res = await fetch('/api/live2d/state');
+        if (!res.ok) return;
+        const state = await res.json();
+
+        // New audio available?
+        if (state.audio_version > lastAudioVersion && !isSpeaking) {
+          lastAudioVersion = state.audio_version;
+          // Apply emotion before speaking
+          if (state.emotion) applyEmotion(state.emotion);
+          // Show subtitle
+          showSubtitle(state.reply_text || '');
+          // Play audio with lip sync
+          const audioUrl = `/api/live2d/audio?v=${state.audio_version}`;
+          await playAudioWithLipSync(audioUrl);
+          // Hide subtitle after a delay
+          setTimeout(() => showSubtitle(''), 2000);
+        }
+      } catch (e) {
+        // Backend not ready yet
+      }
+    }
+
+    // ============================================================
+    //  8. Window resize handler
+    // ============================================================
+    function setupResize() {
+      window.addEventListener('resize', () => {
+        if (currentModel && modelConfig) {
+          currentModel.x = pixiApp.screen.width / 2 + (modelConfig.initialXshift || 0);
+          currentModel.y = pixiApp.screen.height / 2 + (modelConfig.initialYshift || 0);
+        }
+      });
+    }
+
+    // ============================================================
+    //  9. Boot sequence
+    // ============================================================
+    async function boot() {
+      initPixi();
+      setupMouseTracking();
+      setupResize();
+
+      // Fetch Live2D config from backend
+      try {
+        const res = await fetch('/api/live2d/models');
+        if (!res.ok) throw new Error('Failed to fetch models');
+        const data = await res.json();
+
+        if (data.current && data.current.url) {
+          modelConfig = data.current;
+          await loadModel(data.current.url, data.current);
+        } else if (data.models && data.models.length > 0) {
+          modelConfig = data.models[0];
+          await loadModel(data.models[0].url, data.models[0]);
+        } else {
+          statusEl.textContent = 'no model found';
+          console.warn('[live2d] No models available. Put models in live2d-models/ directory.');
+        }
+      } catch (err) {
+        statusEl.textContent = 'error';
+        console.error('[live2d] Boot error:', err);
+      }
+
+      // Start state polling loop (every 300ms)
+      setInterval(pollState, 300);
+    }
+
+    // Ensure user interaction for AudioContext (browser policy)
+    document.body.addEventListener('click', () => {
+      ensureAudioContext();
+      if (audioContext.state === 'suspended') audioContext.resume();
+    }, { once: true });
+
+    window.addEventListener('DOMContentLoaded', boot);
+  </script>
+</body>
+</html>

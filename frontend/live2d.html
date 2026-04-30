@@ -396,9 +396,14 @@
           }
           let rawValue = Math.sqrt(sumSq / dataArray.length);
 
-          // Smooth with lerp and amplify (increased to 5.0 for more visible movement)
+          // Smooth with lerp and amplify (increased to 8.0 for more visible movement)
           smoothedValue += (rawValue - smoothedValue) * 0.4;
-          mouthValueForTicker = Math.min(1, smoothedValue * 5.0);
+          mouthValueForTicker = Math.min(1, smoothedValue * 8.0);
+          
+          // Debugging log (throttled)
+          if (Math.random() < 0.05 && mouthValueForTicker > 0) {
+             console.log('[live2d-debug] Lip sync amplitude:', mouthValueForTicker.toFixed(3), 'Raw:', rawValue.toFixed(3));
+          }
 
           requestAnimationFrame(updateMouth);
         }

@@ -42,6 +42,45 @@
     }
     #status.connected { color: #66ffcc; }
     #status.speaking  { color: #ffaa44; }
+
+    /* ── Floating control panel ── */
+    #ctrl-toggle {
+      position: fixed; bottom: 16px; right: 16px; z-index: 200;
+      width: 40px; height: 40px; border-radius: 50%;
+      background: rgba(255,255,255,0.12); backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.15); color: #ccc;
+      font-size: 20px; cursor: pointer; display: flex;
+      align-items: center; justify-content: center;
+      transition: background 0.2s, transform 0.2s;
+    }
+    #ctrl-toggle:hover { background: rgba(255,255,255,0.22); transform: scale(1.1); }
+
+    #ctrl-panel {
+      position: fixed; bottom: 68px; right: 16px; z-index: 200;
+      width: 240px; padding: 16px 18px;
+      background: rgba(15,18,25,0.85); backdrop-filter: blur(16px);
+      border-radius: 16px; border: 1px solid rgba(255,255,255,0.08);
+      color: #ddd; font-size: 13px;
+      transform: translateY(8px); opacity: 0; pointer-events: none;
+      transition: opacity 0.25s ease, transform 0.25s ease;
+    }
+    #ctrl-panel.open { opacity: 1; transform: translateY(0); pointer-events: all; }
+
+    #ctrl-panel label {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 12px; gap: 8px;
+    }
+    #ctrl-panel label span { flex-shrink: 0; min-width: 52px; }
+    #ctrl-panel label small { color: #888; min-width: 36px; text-align: right; font-size: 12px; }
+
+    #ctrl-panel input[type=range] {
+      flex: 1; height: 4px; -webkit-appearance: none; appearance: none;
+      background: rgba(255,255,255,0.15); border-radius: 2px; outline: none;
+    }
+    #ctrl-panel input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+      background: #66ffcc; cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -49,6 +88,23 @@
   <div id="subtitle-wrap"><div id="subtitle"></div></div>
   <div id="emotion-badge"></div>
   <div id="status">connecting...</div>
+
+  <!-- Floating controls -->
+  <div id="ctrl-toggle" onclick="toggleCtrlPanel()" title="设置">⚙</div>
+  <div id="ctrl-panel">
+    <label>
+      <span>模型大小</span>
+      <input type="range" id="scale-slider" min="0.05" max="1.0" step="0.01" value="0.3"
+             oninput="onScaleChange(this.value)">
+      <small id="scale-val">0.30</small>
+    </label>
+    <label>
+      <span>音量</span>
+      <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="1"
+             oninput="onVolumeChange(this.value)">
+      <small id="volume-val">100%</small>
+    </label>
+  </div>
 
   <!-- Live2D Cubism 4 Core (must load first) -->
   <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"></script>
@@ -65,14 +121,40 @@
     let currentModel = null;
     let audioContext = null;
     let analyserNode = null;
+    let gainNode = null;  // For volume control
     let lastAudioVersion = 0;
     let isSpeaking = false;
     let currentEmotion = 'neutral';
     let modelConfig = null;
+    let currentScale = 0.3;
+    let currentVolume = 1.0;
 
     const subtitleEl  = document.getElementById('subtitle');
     const emotionEl   = document.getElementById('emotion-badge');
     const statusEl    = document.getElementById('status');
+
+    // ============================================================
+    //  Control panel functions
+    // ============================================================
+    function toggleCtrlPanel() {
+      document.getElementById('ctrl-panel').classList.toggle('open');
+    }
+
+    function onScaleChange(val) {
+      currentScale = parseFloat(val);
+      document.getElementById('scale-val').textContent = currentScale.toFixed(2);
+      if (currentModel) {
+        currentModel.scale.set(currentScale);
+      }
+    }
+
+    function onVolumeChange(val) {
+      currentVolume = parseFloat(val);
+      document.getElementById('volume-val').textContent = Math.round(currentVolume * 100) + '%';
+      if (gainNode) {
+        gainNode.gain.value = currentVolume;
+      }
+    }
 
     // Default emotion → expression index mapping (overridden by model config)
     const DEFAULT_EMOTION_MAP = {
@@ -112,15 +194,23 @@
 
         // Apply scale and position
         const scale = config.kScale || 0.3;
+        currentScale = scale;
         model.scale.set(scale);
         model.anchor.set(0.5, 0.5);
         model.x = pixiApp.screen.width / 2 + (config.initialXshift || 0);
         model.y = pixiApp.screen.height / 2 + (config.initialYshift || 0);
 
+        // Sync scale slider with model config
+        document.getElementById('scale-slider').value = scale;
+        document.getElementById('scale-val').textContent = scale.toFixed(2);
+
         // Enable mouse tracking (eyes follow cursor)
         model.interactive = true;
         pixiApp.stage.addChild(model);
         currentModel = model;
+
+        // Reset mouth param detection for new model
+        activeMouthParam = null;
 
         // Start idle motion if defined
         const idleGroup = config.idleMotionGroupName || 'Idle';
@@ -156,6 +246,10 @@
         analyserNode = audioContext.createAnalyser();
         analyserNode.fftSize = 256;
         analyserNode.smoothingTimeConstant = 0.6;
+        // Create gain node for volume control
+        gainNode = audioContext.createGain();
+        gainNode.gain.value = currentVolume;
+        gainNode.connect(audioContext.destination);
       }
     }
 
@@ -208,8 +302,9 @@
 
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
+        // Audio chain: source → analyser (for lip sync) → gain (for volume) → speakers
         source.connect(localAnalyser);
-        localAnalyser.connect(audioContext.destination);
+        localAnalyser.connect(gainNode);
 
         isSpeaking = true;
         statusEl.textContent = 'speaking';

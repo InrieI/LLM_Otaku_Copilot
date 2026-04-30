@@ -236,28 +236,19 @@
         } catch (e) {}
 
         // === Hook into model update for proper lip sync timing ===
-        // The key: we must set mouth param AFTER motionManager.update() runs,
-        // otherwise idle motions will overwrite our value every frame.
-        // And then we MUST call coreModel.update() again to apply the new parameter to vertices.
-        const origUpdate = model.internalModel.update.bind(model.internalModel);
-        model.internalModel.update = function(dt, now) {
-          origUpdate(dt, now);
-          
-          let modified = false;
+        // The officially supported way in pixi-live2d-display is to listen to 'beforeModelUpdate'
+        // This fires after motions and physics, but right before coreModel.update() calculates vertices.
+        model.internalModel.on('beforeModelUpdate', () => {
           if (isSpeaking && mouthValueForTicker > 0) {
             const p = detectMouthParam();
             if (p) {
               try {
-                this.coreModel.setParameterValueById(p, mouthValueForTicker);
-                modified = true;
+                // This correctly applies our value over any Idle motion before vertices are drawn!
+                model.internalModel.coreModel.setParameterValueById(p, mouthValueForTicker);
               } catch (e) {}
             }
           }
-          
-          if (modified && typeof this.coreModel.update === 'function') {
-            this.coreModel.update();
-          }
-        };
+        });
 
         // Start idle motion if defined
         const idleGroup = config.idleMotionGroupName || 'Idle';
@@ -397,9 +388,9 @@
           }
           let rawValue = Math.sqrt(sumSq / dataArray.length);
 
-          // Smooth with lerp and amplify
+          // Smooth with lerp and amplify (increased to 5.0 for more visible movement)
           smoothedValue += (rawValue - smoothedValue) * 0.4;
-          mouthValueForTicker = Math.min(1, smoothedValue * 2.5);
+          mouthValueForTicker = Math.min(1, smoothedValue * 5.0);
 
           requestAnimationFrame(updateMouth);
         }

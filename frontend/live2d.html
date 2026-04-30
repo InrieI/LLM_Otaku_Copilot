@@ -246,15 +246,17 @@
             }
           }
 
-          // 2. Apply Lip Sync
+          // 2. Apply Lip Sync using shotgun approach (blast all known mouth parameters)
           if (isSpeaking && mouthValueForTicker > 0) {
-            const p = detectMouthParam();
-            if (p) {
-              try {
-                // This correctly applies our value over any Idle motion before vertices are drawn!
-                model.internalModel.coreModel.setParameterValueById(p, mouthValueForTicker);
-              } catch (e) {}
-            }
+             const allMouthParams = [
+               'ParamMouthOpenY', 'PARAM_MOUTH_OPEN_Y', 'ParamMouthOpen', 
+               'Param_MouthOpenY', 'MouthOpen', 'ParamMouthForm'
+             ];
+             for (const p of allMouthParams) {
+                 try {
+                     model.internalModel.coreModel.setParameterValueById(p, mouthValueForTicker);
+                 } catch (e) {}
+             }
           }
         });
 

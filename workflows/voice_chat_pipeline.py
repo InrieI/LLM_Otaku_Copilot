@@ -44,6 +44,7 @@ class VoiceChatWorkflow:
         self.processing_lock = threading.Lock()
         self.pending_screenshot = False
         self.screen_config = None
+        self.live2d_state = None
 
         self.llm_config = load_config()
         self.stt_config = load_stt_config(self.output_dir)
@@ -264,13 +265,9 @@ class VoiceChatWorkflow:
         self.last_reply_text_path.write_text(clean_reply, encoding="utf-8")
 
         # Update Live2D state for the frontend display page
-        try:
-            from web_app import live2d_state
-            live2d_state["emotion"] = emotion
-            live2d_state["reply_text"] = clean_reply
-        except Exception:
-            pass
-
+        if self.live2d_state is not None:
+            self.live2d_state["emotion"] = emotion
+            self.live2d_state["reply_text"] = clean_reply
         audio_path = synthesize_tts(clean_reply, self.tts_config, self.last_reply_audio_path)
         if audio_path:
             adjusted_path = apply_volume_wav(
@@ -280,12 +277,8 @@ class VoiceChatWorkflow:
             )
 
             # Notify Live2D frontend that new audio is available
-            try:
-                from web_app import live2d_state
-                live2d_state["audio_version"] = live2d_state.get("audio_version", 0) + 1
-            except Exception:
-                pass
-
+            if self.live2d_state is not None:
+                self.live2d_state["audio_version"] = self.live2d_state.get("audio_version", 0) + 1
             # Check if browser audio is enabled (Live2D page handles playback)
             browser_audio = False
             try:

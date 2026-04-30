@@ -45,6 +45,7 @@ wakeword_training_state = {"status": "idle", "message": "", "name": ""}
 wakeword_sample_state = {"path": None, "label": None, "name": None}
 live2d_models_dir = Path(__file__).resolve().parent / "live2d-models"
 live2d_state = {"emotion": "neutral", "reply_text": "", "audio_version": 0}
+workflow.live2d_state = live2d_state
 
 # Serve static files for frontend
 app.mount("/static", StaticFiles(directory=str(frontend_dir)), name="static")

@@ -309,10 +309,15 @@
 
       try {
         const coreModel = currentModel.internalModel.coreModel;
-        const count = coreModel.getParameterCount();
-        const ids = [];
-        for (let i = 0; i < count; i++) {
-          ids.push(coreModel.getParameterIds()[i]);
+        
+        // Cubism 2 vs Cubism 4 have different ways to get parameter IDs
+        let ids = [];
+        if (typeof coreModel.getParameterIds === 'function') {
+          const count = coreModel.getParameterCount();
+          const pIds = coreModel.getParameterIds();
+          for (let i = 0; i < count; i++) ids.push(pIds[i]);
+        } else if (coreModel.parameters && coreModel.parameters.ids) {
+          ids = coreModel.parameters.ids;
         }
 
         // 1. Try exact known matches first
@@ -336,13 +341,13 @@
             }
           }
         }
-
-        // Fallback
-        activeMouthParam = MOUTH_PARAMS[0];
-        console.warn('[live2d] No known mouth param found, using default fallback:', activeMouthParam);
       } catch (e) {
-        console.error('[live2d] Error detecting mouth param:', e);
+        console.warn('[live2d] Error during parameter detection (safe to ignore):', e);
       }
+      
+      // Fallback
+      activeMouthParam = MOUTH_PARAMS[0];
+      console.warn('[live2d] No known mouth param found, using default fallback:', activeMouthParam);
       return activeMouthParam;
     }
 

@@ -501,9 +501,9 @@
         });
       }
     }
-    document.body.addEventListener('click', activateAudio);
-    document.body.addEventListener('keydown', activateAudio, { once: true });
-
+    // Use capture phase so PIXI doesn't swallow the event before we activate audio
+    window.addEventListener('pointerdown', activateAudio, { capture: true });
+    window.addEventListener('keydown', activateAudio, { capture: true, once: true });
     window.addEventListener('DOMContentLoaded', () => {
       boot();
       // Try to activate immediately (works if user already interacted with the page)

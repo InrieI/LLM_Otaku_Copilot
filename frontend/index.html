@@ -12,13 +12,13 @@
 
   <style>
     :root {
-      /* 极其柔和的低饱和度“莫兰迪”灰蓝配色体系 */
-      --md-sys-color-background: #F5F7F9; /* 带着一点点温度的极淡灰背景 */
+      /* AstrBot 风格的明亮、干净、低饱和度浅蓝配色体系 */
+      --md-sys-color-background: #F7FAFC; /* 极淡的冷蓝灰背景，非常干净 */
       --md-sys-color-surface: #FFFFFF;    /* 纯白卡片表面，显得干净透气 */
-      --md-sys-color-primary: #6D7B8D;    /* 核心色：低饱和度的灰蓝色（莫兰迪蓝），温和不刺眼，同时能保证白色文字的清晰度 */
+      --md-sys-color-primary: #7BA4C6;    /* 核心色：柔和的浅蓝色，不过分夺目 */
       --md-sys-color-on-primary: #FFFFFF;
-      --md-sys-color-primary-container: #EAEFF4; /* 极浅的柔和灰蓝容器色 */
-      --md-sys-color-on-primary-container: #2C3642; /* 容器内的深色文字，提供足够的对比度 */
+      --md-sys-color-primary-container: #EBF4FA; /* 极浅的蓝白容器色 */
+      --md-sys-color-on-primary-container: #2C4F70; /* 容器内的深色文字，提供足够的对比度 */
     }
     body {
       background-color: var(--md-sys-color-background);
@@ -210,12 +210,76 @@
                   
                   <v-text-field 
                     v-model="config.model" 
-                    label="模型型号" 
+                    label="模型型号 (Model Name)" 
                     variant="outlined" 
                     class="mt-4"
                     hint="例如: deepseek-v4-flash, gpt-4o-mini"
                     persistent-hint>
                   </v-text-field>
+
+                  <!-- Dynamic API Key & Base URL based on provider -->
+                  <v-expand-transition>
+                    <div v-if="config.provider" class="mt-4">
+                      
+                      <!-- Ollama -->
+                      <div v-if="config.provider === 'ollama'">
+                        <v-text-field 
+                          v-model="config.ollama_url" 
+                          label="Ollama Base URL" 
+                          variant="outlined" 
+                          prepend-inner-icon="mdi-link">
+                        </v-text-field>
+                      </div>
+
+                      <!-- DeepSeek -->
+                      <div v-else-if="config.provider === 'deepseek'">
+                        <v-text-field 
+                          v-model="config.deepseek_base_url" 
+                          label="DeepSeek Base URL" 
+                          variant="outlined" 
+                          prepend-inner-icon="mdi-link">
+                        </v-text-field>
+                        <v-text-field 
+                          v-model="config.providers.deepseek.keys[0]" 
+                          label="API Key" 
+                          type="password"
+                          variant="outlined" 
+                          prepend-inner-icon="mdi-key"
+                          class="mt-2">
+                        </v-text-field>
+                      </div>
+
+                      <!-- OpenAI Compat -->
+                      <div v-else-if="config.provider === 'openai_compat'">
+                        <v-text-field 
+                          v-model="config.openai_base_url" 
+                          label="OpenAI 兼容 Base URL" 
+                          variant="outlined" 
+                          prepend-inner-icon="mdi-link">
+                        </v-text-field>
+                        <v-text-field 
+                          v-model="config.providers.openai_compat.keys[0]" 
+                          label="API Key" 
+                          type="password"
+                          variant="outlined" 
+                          prepend-inner-icon="mdi-key"
+                          class="mt-2">
+                        </v-text-field>
+                      </div>
+
+                      <!-- Gemini -->
+                      <div v-else-if="config.provider === 'gemini'">
+                        <v-text-field 
+                          v-model="config.providers.gemini.keys[0]" 
+                          label="Google Gemini API Key" 
+                          type="password"
+                          variant="outlined" 
+                          prepend-inner-icon="mdi-key">
+                        </v-text-field>
+                      </div>
+
+                    </div>
+                  </v-expand-transition>
                 </v-card-text>
               </v-card>
             </v-col>
@@ -309,20 +373,30 @@
                       hide-details
                     ></v-switch>
                   </div>
-                  <v-row class="mt-2">
-                    <v-col cols="12" md="6">
-                      <div class="text-body-2 mb-2" style="color: #49454F;">Silence Seconds (静音判定秒数): <b>{{ config.recording.vad.silence_seconds }}</b></div>
-                      <v-slider v-model="config.recording.vad.silence_seconds" min="0.3" max="3.0" step="0.1" color="primary" track-color="primary-container"></v-slider>
-                    </v-col>
-                    <v-col cols="12" md="6">
-                      <div class="text-body-2 mb-2" style="color: #49454F;">Aggressiveness (灵敏度 0-3): <b>{{ config.recording.vad.aggressiveness }}</b></div>
-                      <v-slider v-model="config.recording.vad.aggressiveness" min="0" max="3" step="1" color="primary" track-color="primary-container"></v-slider>
-                    </v-col>
-                    <v-col cols="12" md="6">
-                      <div class="text-body-2 mb-2" style="color: #49454F;">Min Record Seconds (最短录音时长): <b>{{ config.recording.vad.min_record_seconds }}</b></div>
-                      <v-slider v-model="config.recording.vad.min_record_seconds" min="0.2" max="2.0" step="0.1" color="primary" track-color="primary-container"></v-slider>
-                    </v-col>
-                  </v-row>
+                  <v-expansion-panels variant="accordion" class="mt-4" flat style="border: 1px solid rgba(0,0,0,0.05); border-radius: 12px; overflow: hidden;">
+                    <v-expansion-panel style="background-color: var(--md-sys-color-background);">
+                      <v-expansion-panel-title class="text-body-2 font-weight-medium" style="color: #49454F;">
+                        <span class="material-symbols-outlined mr-2" style="font-size: 20px;">tune</span>
+                        VAD 高级参数设置
+                      </v-expansion-panel-title>
+                      <v-expansion-panel-text class="pt-4">
+                        <v-row>
+                          <v-col cols="12" md="6">
+                            <div class="text-body-2 mb-2" style="color: #49454F;">Silence Seconds (静音判定秒数): <b>{{ config.recording.vad.silence_seconds }}</b></div>
+                            <v-slider v-model="config.recording.vad.silence_seconds" min="0.3" max="3.0" step="0.1" color="primary" track-color="primary-container" hide-details></v-slider>
+                          </v-col>
+                          <v-col cols="12" md="6">
+                            <div class="text-body-2 mb-2" style="color: #49454F;">Aggressiveness (灵敏度 0-3): <b>{{ config.recording.vad.aggressiveness }}</b></div>
+                            <v-slider v-model="config.recording.vad.aggressiveness" min="0" max="3" step="1" color="primary" track-color="primary-container" hide-details></v-slider>
+                          </v-col>
+                          <v-col cols="12" md="6">
+                            <div class="text-body-2 mb-2" style="color: #49454F;">Min Record Seconds (最短录音时长): <b>{{ config.recording.vad.min_record_seconds }}</b></div>
+                            <v-slider v-model="config.recording.vad.min_record_seconds" min="0.2" max="2.0" step="0.1" color="primary" track-color="primary-container" hide-details></v-slider>
+                          </v-col>
+                        </v-row>
+                      </v-expansion-panel-text>
+                    </v-expansion-panel>
+                  </v-expansion-panels>
                 </v-card-text>
               </v-card>
             </v-col>
@@ -383,52 +457,66 @@
                             内置模型不包含 hey_google，可选 alexa / hey_jarvis / hey_mycroft / hey_rhasspy / timer / weather。
                           </p>
                         </v-col>
-                        <v-col cols="12" md="6">
-                          <div class="text-body-2 mb-2" style="color: #49454F;">Threshold (触发阈值): <b>{{ config.wakeword.threshold }}</b></div>
-                          <v-slider v-model="config.wakeword.threshold" min="0.1" max="0.99" step="0.01" color="primary" track-color="primary-container"></v-slider>
-                        </v-col>
-                        <v-col cols="12" md="6">
-                          <div class="text-body-2 mb-2" style="color: #49454F;">Cooldown Seconds (触发冷却): <b>{{ config.wakeword.cooldown_seconds }}</b></div>
-                          <v-slider v-model="config.wakeword.cooldown_seconds" min="0.5" max="6.0" step="0.5" color="primary" track-color="primary-container"></v-slider>
-                        </v-col>
-                        <v-col cols="12" md="6">
-                          <v-switch
-                            v-model="config.wakeword.with_screenshot"
-                            label="唤醒后截图 + 文字"
-                            color="primary"
-                            hide-details
-                          ></v-switch>
-                        </v-col>
+                        <v-col cols="12">
+                          <v-expansion-panels variant="accordion" class="mt-2" flat style="border: 1px solid rgba(0,0,0,0.05); border-radius: 12px; overflow: hidden;">
+                            <v-expansion-panel style="background-color: var(--md-sys-color-background);">
+                              <v-expansion-panel-title class="text-body-2 font-weight-medium" style="color: #49454F;">
+                                <span class="material-symbols-outlined mr-2" style="font-size: 20px;">tune</span>
+                                唤醒词高级设置与自定义训练
+                              </v-expansion-panel-title>
+                              <v-expansion-panel-text class="pt-4">
+                                <v-row>
+                                  <v-col cols="12" md="6">
+                                    <div class="text-body-2 mb-2" style="color: #49454F;">Threshold (触发阈值): <b>{{ config.wakeword.threshold }}</b></div>
+                                    <v-slider v-model="config.wakeword.threshold" min="0.1" max="0.99" step="0.01" color="primary" track-color="primary-container" hide-details></v-slider>
+                                  </v-col>
+                                  <v-col cols="12" md="6">
+                                    <div class="text-body-2 mb-2" style="color: #49454F;">Cooldown Seconds (触发冷却): <b>{{ config.wakeword.cooldown_seconds }}</b></div>
+                                    <v-slider v-model="config.wakeword.cooldown_seconds" min="0.5" max="6.0" step="0.5" color="primary" track-color="primary-container" hide-details></v-slider>
+                                  </v-col>
+                                  <v-col cols="12" md="6">
+                                    <v-switch
+                                      v-model="config.wakeword.with_screenshot"
+                                      label="唤醒后截图 + 文字"
+                                      color="primary"
+                                      hide-details
+                                    ></v-switch>
+                                  </v-col>
 
-                        <v-col cols="12" v-if="config.wakeword.mode === 'custom'">
-                          <div class="d-flex align-center flex-wrap" style="gap: 12px;">
-                            <v-btn color="primary" variant="flat" @click="startWakewordSample('positive')" :disabled="wakewordTraining.recording">
-                              录正样本
-                            </v-btn>
-                            <v-btn color="primary" variant="flat" @click="startWakewordSample('negative')" :disabled="wakewordTraining.recording">
-                              录负样本
-                            </v-btn>
-                            <v-btn variant="text" color="error" @click="stopWakewordSample" :disabled="!wakewordTraining.recording">
-                              停止采样
-                            </v-btn>
-                            <v-btn variant="text" color="primary" @click="refreshWakewordStats">
-                              刷新样本统计
-                            </v-btn>
-                            <v-btn variant="text" color="primary" @click="openSampleManager">
-                              管理样本
-                            </v-btn>
-                          </div>
-                          <div class="text-caption mt-2" style="color: #6b7280;">
-                            正样本: {{ wakewordTraining.positive }} | 负样本: {{ wakewordTraining.negative }}
-                          </div>
-                          <div class="d-flex align-center flex-wrap mt-3" style="gap: 12px;">
-                            <v-btn color="primary" variant="flat" @click="trainWakeword">开始训练</v-btn>
-                            <v-chip v-if="wakewordTraining.status !== 'idle'" color="primary" variant="flat">
-                              {{ wakewordTraining.status }}
-                            </v-chip>
-                            <span class="text-caption" style="color: #6b7280;">{{ wakewordTraining.message }}</span>
-                          </div>
-                          <p class="text-caption mt-2" style="color: #6b7280;">建议正样本 15+，负样本 30+，越多越稳。</p>
+                                  <v-col cols="12" v-if="config.wakeword.mode === 'custom'" class="mt-4">
+                                    <div class="d-flex align-center flex-wrap" style="gap: 12px;">
+                                      <v-btn color="primary" variant="flat" @click="startWakewordSample('positive')" :disabled="wakewordTraining.recording">
+                                        录正样本
+                                      </v-btn>
+                                      <v-btn color="primary" variant="flat" @click="startWakewordSample('negative')" :disabled="wakewordTraining.recording">
+                                        录负样本
+                                      </v-btn>
+                                      <v-btn variant="text" color="error" @click="stopWakewordSample" :disabled="!wakewordTraining.recording">
+                                        停止采样
+                                      </v-btn>
+                                      <v-btn variant="text" color="primary" @click="refreshWakewordStats">
+                                        刷新样本统计
+                                      </v-btn>
+                                      <v-btn variant="text" color="primary" @click="openSampleManager">
+                                        管理样本
+                                      </v-btn>
+                                    </div>
+                                    <div class="text-caption mt-2" style="color: #6b7280;">
+                                      正样本: {{ wakewordTraining.positive }} | 负样本: {{ wakewordTraining.negative }}
+                                    </div>
+                                    <div class="d-flex align-center flex-wrap mt-3" style="gap: 12px;">
+                                      <v-btn color="primary" variant="flat" @click="trainWakeword">开始训练</v-btn>
+                                      <v-chip v-if="wakewordTraining.status !== 'idle'" color="primary" variant="flat">
+                                        {{ wakewordTraining.status }}
+                                      </v-chip>
+                                      <span class="text-caption" style="color: #6b7280;">{{ wakewordTraining.message }}</span>
+                                    </div>
+                                    <p class="text-caption mt-2" style="color: #6b7280;">建议正样本 15+，负样本 30+，越多越稳。</p>
+                                  </v-col>
+                                </v-row>
+                              </v-expansion-panel-text>
+                            </v-expansion-panel>
+                          </v-expansion-panels>
                         </v-col>
                       </v-row>
                       <p class="text-caption mt-2" style="color: #6b7280;">启用后将自动禁用热键，唤醒词触发录音。</p>
@@ -510,20 +598,21 @@
 
             <!-- Advanced TTS Parameters Section -->
             <v-col cols="12">
-                <v-card class="md3-card pb-4" flat>
-                  <v-card-text>
-                    <div class="section-title">
-                      <span class="material-symbols-outlined">discover_tune</span> 参数微调模块
-                    </div>
+              <v-expansion-panels variant="accordion" class="mt-2" flat style="border: 1px solid rgba(0,0,0,0.05); border-radius: 28px; overflow: hidden;">
+                <v-expansion-panel style="background-color: var(--md-sys-color-surface);">
+                  <v-expansion-panel-title class="section-title mb-0" style="padding: 16px;">
+                    <div><span class="material-symbols-outlined mr-2">discover_tune</span> TTS 高级生成参数微调</div>
+                  </v-expansion-panel-title>
+                  <v-expansion-panel-text class="pt-2">
                     <!-- 将所有 config.json 中的 TTS 核心参数彻底暴露 -->
-                    <v-row class="px-2 mt-4">
+                    <v-row class="px-2 mt-2">
                         <v-col cols="12" md="6" class="py-1">
                           <div class="text-body-2 mb-2" style="color: #49454F;">Volume (音量): <b>{{ config.tts.volume }}</b></div>
-                          <v-slider v-model="config.tts.volume" min="0" max="1" step="0.1" color="primary" track-color="primary-container"></v-slider>
+                          <v-slider v-model="config.tts.volume" min="0" max="1" step="0.1" color="primary" track-color="primary-container" hide-details></v-slider>
                         </v-col>
                         <v-col cols="12" md="6" class="py-1">
                           <div class="text-body-2 mb-2" style="color: #49454F;">Speed Factor (语速): <b>{{ config.tts.speed_factor }}</b></div>
-                          <v-slider v-model="config.tts.speed_factor" min="0.5" max="2.0" step="0.1" color="primary" track-color="primary-container"></v-slider>
+                          <v-slider v-model="config.tts.speed_factor" min="0.5" max="2.0" step="0.1" color="primary" track-color="primary-container" hide-details></v-slider>
                         </v-col>
                         <v-col cols="12" md="6" class="py-1">
                           <div class="text-body-2 mb-2" style="color: #49454F;">Temperature (发散度): <b>{{ config.tts.temperature }}</b></div>
@@ -576,8 +665,9 @@
                         </v-col>
                         
                     </v-row>
-                  </v-card-text>
-                </v-card>
+                  </v-expansion-panel-text>
+                </v-expansion-panel>
+              </v-expansion-panels>
             </v-col>
             <!-- Live2D Section -->
             <v-col cols="12">
@@ -686,13 +776,13 @@
         themes: {
           light: {
             colors: {
-              primary: '#00639B',
+              primary: '#7BA4C6',
               'on-primary': '#FFFFFF',
-              'primary-container': '#CDE5FF',
-              'on-primary-container': '#001D33',
-              surface: '#FAFCFF',
+              'primary-container': '#EBF4FA',
+              'on-primary-container': '#2C4F70',
+              surface: '#FFFFFF',
               'on-surface': '#1A1C1E',
-              background: '#F2F7FC',
+              background: '#F7FAFC',
               'on-background': '#1A1C1E',
             }
           }
@@ -711,6 +801,12 @@
         const config = ref({
             provider: '', model: '',
             system_prompt: '',
+            openai_base_url: '', deepseek_base_url: '', ollama_url: '',
+            providers: {
+              gemini: { keys: [''] },
+              openai_compat: { keys: [''] },
+              deepseek: { keys: [''] }
+            },
             stt: { provider: 'local', local: {}, groq: {} },
             recording: {
               device_index: null,
@@ -796,6 +892,14 @@
                 if (!config.value.live2d) {
                   config.value.live2d = { model_name: '', browser_audio: false };
                 }
+                
+                // Ensure providers have keys array populated
+                ['gemini', 'openai_compat', 'deepseek'].forEach(p => {
+                  if (!config.value.providers) config.value.providers = {};
+                  if (!config.value.providers[p]) config.value.providers[p] = { keys: [] };
+                  if (!config.value.providers[p].keys) config.value.providers[p].keys = [];
+                  if (config.value.providers[p].keys.length === 0) config.value.providers[p].keys.push('');
+                });
             }
         };
 

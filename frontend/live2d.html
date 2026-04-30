@@ -239,6 +239,14 @@
         // The officially supported way in pixi-live2d-display is to listen to 'beforeModelUpdate'
         // This fires after motions and physics, but right before coreModel.update() calculates vertices.
         model.internalModel.on('beforeModelUpdate', () => {
+          // 1. Apply any constant presets (e.g., clothes, hair toggles)
+          if (modelConfig && modelConfig.presets) {
+            for (const [pId, pVal] of Object.entries(modelConfig.presets)) {
+              try { model.internalModel.coreModel.setParameterValueById(pId, pVal); } catch (e) {}
+            }
+          }
+
+          // 2. Apply Lip Sync
           if (isSpeaking && mouthValueForTicker > 0) {
             const p = detectMouthParam();
             if (p) {

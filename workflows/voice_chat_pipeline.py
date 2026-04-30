@@ -191,9 +191,11 @@ class VoiceChatWorkflow:
 
     # Emotion instruction appended to system prompt when Live2D is active
     EMOTION_INSTRUCTION = (
-        "\n\n【情绪标注规则】在每句回复的最开头用方括号标注你当前的情绪，"
-        "可选标签：[neutral], [joy], [sadness], [anger], [surprise], [fear], [disgust], [smirk]。"
-        "例如：\"[joy] 当然可以啊！\"。只标注一个最主要的情绪，标签后面紧跟回复内容。"
+        "\n\n【重要·情绪标注规则】你必须在每句回复的最开头用方括号标注你当前的情绪。"
+        "注意：这里的方括号[]情绪标签是系统必需的格式标记，和圆括号()动作描写完全不同，不受任何禁止使用括号的规则约束。"
+        "可选标签（只能选一个）：[neutral]、[joy]、[sadness]、[anger]、[surprise]、[fear]、[disgust]、[smirk]。"
+        "格式示例：\"[joy] 当然可以啊！\"、\"[smirk] 你确定？\"、\"[sadness] 好吧...\"。"
+        "每条回复必须且只能以一个方括号情绪标签开头，标签后面紧跟正文内容。绝对不要省略情绪标签。"
     )
 
     def _is_live2d_enabled(self):

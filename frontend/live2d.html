@@ -128,6 +128,7 @@
     let modelConfig = null;
     let currentScale = 0.3;
     let currentVolume = 1.0;
+    let mouthValueForTicker = 0;  // Written by audio analysis, read by model update hook
 
     const subtitleEl  = document.getElementById('subtitle');
     const emotionEl   = document.getElementById('emotion-badge');
@@ -211,6 +212,36 @@
 
         // Reset mouth param detection for new model
         activeMouthParam = null;
+
+        // === Enumerate all model parameters for debugging ===
+        try {
+          const coreModel = model.internalModel.coreModel;
+          const count = coreModel.getParameterCount();
+          const ids = [];
+          for (let i = 0; i < count; i++) {
+            ids.push(coreModel.getParameterIds()[i]);
+          }
+          console.log('[live2d] Model parameters (' + count + '):', ids.join(', '));
+        } catch (e) {
+          console.warn('[live2d] Could not enumerate parameters:', e);
+        }
+
+        // === Hook into model update for proper lip sync timing ===
+        // The key: we must set mouth param AFTER motionManager.update() runs,
+        // otherwise idle motions will overwrite our value every frame.
+        const origUpdate = model.internalModel.update.bind(model.internalModel);
+        model.internalModel.update = function(dt, now) {
+          origUpdate(dt, now);
+          // Apply lip sync value AFTER all motion/physics updates
+          if (isSpeaking && mouthValueForTicker > 0) {
+            const p = detectMouthParam();
+            if (p) {
+              try {
+                this.coreModel.setParameterValueById(p, mouthValueForTicker);
+              } catch (e) {}
+            }
+          }
+        };
 
         // Start idle motion if defined
         const idleGroup = config.idleMotionGroupName || 'Idle';
@@ -307,17 +338,19 @@
         localAnalyser.connect(gainNode);
 
         isSpeaking = true;
+        mouthValueForTicker = 0;
         statusEl.textContent = 'speaking';
         statusEl.className = 'speaking';
         source.start(0);
 
-        const mouthParam = detectMouthParam();
+        // Detect mouth param early so it's ready for the ticker
+        detectMouthParam();
         // Use time-domain data for more responsive amplitude detection
         const dataArray = new Uint8Array(localAnalyser.fftSize);
         let smoothedValue = 0;
 
         function updateMouth() {
-          if (!isSpeaking || !currentModel) return;
+          if (!isSpeaking) return;
 
           localAnalyser.getByteTimeDomainData(dataArray);
           // Calculate RMS amplitude from waveform
@@ -330,14 +363,7 @@
 
           // Smooth with lerp and amplify
           smoothedValue += (rawValue - smoothedValue) * 0.4;
-          const mouthOpen = Math.min(1, smoothedValue * 2.5);
-
-          if (mouthParam) {
-            try {
-              const coreModel = currentModel.internalModel.coreModel;
-              coreModel.setParameterValueById(mouthParam, mouthOpen);
-            } catch (e) { /* ignore */ }
-          }
+          mouthValueForTicker = Math.min(1, smoothedValue * 2.5);
 
           requestAnimationFrame(updateMouth);
         }
@@ -345,15 +371,9 @@
 
         source.onended = () => {
           isSpeaking = false;
+          mouthValueForTicker = 0;
           statusEl.textContent = 'connected';
           statusEl.className = 'connected';
-          // Close mouth
-          if (mouthParam) {
-            try {
-              const coreModel = currentModel.internalModel.coreModel;
-              coreModel.setParameterValueById(mouthParam, 0);
-            } catch (e) {}
-          }
           source.disconnect();
           localAnalyser.disconnect();
           console.log('[live2d] Audio playback finished');
@@ -361,6 +381,7 @@
       } catch (err) {
         console.error('[live2d] Audio playback error:', err);
         isSpeaking = false;
+        mouthValueForTicker = 0;
       }
     }
 

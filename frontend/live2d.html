@@ -307,23 +307,43 @@
     function detectMouthParam() {
       if (!currentModel) return null;
       if (activeMouthParam) return activeMouthParam;
+
       try {
         const coreModel = currentModel.internalModel.coreModel;
-        for (const p of MOUTH_PARAMS) {
-          try {
-            // Try to read the parameter — if it doesn't throw, it exists
-            const val = coreModel.getParameterValueById(p);
-            if (val !== undefined) {
-              activeMouthParam = p;
-              console.log('[live2d] Mouth parameter found:', p);
-              return p;
-            }
-          } catch (e) { /* try next */ }
+        const count = coreModel.getParameterCount();
+        const ids = [];
+        for (let i = 0; i < count; i++) {
+          ids.push(coreModel.getParameterIds()[i]);
         }
-        // Fallback: try the first one anyway
+
+        // 1. Try exact known matches first
+        for (const p of MOUTH_PARAMS) {
+          if (ids.includes(p)) {
+            activeMouthParam = p;
+            console.log('[live2d] Mouth parameter detected by exact match:', p);
+            return p;
+          }
+        }
+
+        // 2. Try keyword matching
+        const keywords = ['mouthopen', 'mouth_open', 'lip_sync', 'lipsync', 'mouth_y'];
+        for (const id of ids) {
+          const lowerId = id.toLowerCase();
+          for (const kw of keywords) {
+            if (lowerId.includes(kw)) {
+              activeMouthParam = id;
+              console.log('[live2d] Mouth parameter detected by keyword:', id);
+              return id;
+            }
+          }
+        }
+
+        // Fallback
         activeMouthParam = MOUTH_PARAMS[0];
-        console.warn('[live2d] No known mouth param found, using default:', activeMouthParam);
-      } catch (e) {}
+        console.warn('[live2d] No known mouth param found, using default fallback:', activeMouthParam);
+      } catch (e) {
+        console.error('[live2d] Error detecting mouth param:', e);
+      }
       return activeMouthParam;
     }
 

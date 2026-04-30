@@ -159,47 +159,90 @@
       }
     }
 
+    // Common mouth parameter IDs across different Live2D models
+    const MOUTH_PARAMS = ['ParamMouthOpenY', 'PARAM_MOUTH_OPEN_Y', 'ParamMouthOpen', 'Param_MouthOpenY'];
+    let activeMouthParam = null;
+
+    function detectMouthParam() {
+      if (!currentModel) return null;
+      if (activeMouthParam) return activeMouthParam;
+      try {
+        const coreModel = currentModel.internalModel.coreModel;
+        for (const p of MOUTH_PARAMS) {
+          try {
+            // Try to read the parameter — if it doesn't throw, it exists
+            const val = coreModel.getParameterValueById(p);
+            if (val !== undefined) {
+              activeMouthParam = p;
+              console.log('[live2d] Mouth parameter found:', p);
+              return p;
+            }
+          } catch (e) { /* try next */ }
+        }
+        // Fallback: try the first one anyway
+        activeMouthParam = MOUTH_PARAMS[0];
+        console.warn('[live2d] No known mouth param found, using default:', activeMouthParam);
+      } catch (e) {}
+      return activeMouthParam;
+    }
+
     async function playAudioWithLipSync(audioUrl) {
       ensureAudioContext();
       if (audioContext.state === 'suspended') await audioContext.resume();
 
       try {
+        console.log('[live2d] Fetching audio:', audioUrl);
         const response = await fetch(audioUrl);
+        if (!response.ok) {
+          console.error('[live2d] Audio fetch failed:', response.status);
+          return;
+        }
         const arrayBuffer = await response.arrayBuffer();
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        console.log('[live2d] Audio decoded, duration:', audioBuffer.duration.toFixed(2) + 's');
+
+        // Create fresh analyser for this playback
+        const localAnalyser = audioContext.createAnalyser();
+        localAnalyser.fftSize = 256;
+        localAnalyser.smoothingTimeConstant = 0.5;
 
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
-        source.connect(analyserNode);
-        analyserNode.connect(audioContext.destination);
+        source.connect(localAnalyser);
+        localAnalyser.connect(audioContext.destination);
 
         isSpeaking = true;
         statusEl.textContent = 'speaking';
         statusEl.className = 'speaking';
         source.start(0);
 
-        // Start lip sync loop
-        const dataArray = new Uint8Array(analyserNode.frequencyBinCount);
+        const mouthParam = detectMouthParam();
+        // Use time-domain data for more responsive amplitude detection
+        const dataArray = new Uint8Array(localAnalyser.fftSize);
         let smoothedValue = 0;
 
         function updateMouth() {
           if (!isSpeaking || !currentModel) return;
 
-          analyserNode.getByteFrequencyData(dataArray);
-          // Use average of lower frequencies (voice band)
-          let sum = 0;
-          const voiceBand = Math.min(32, dataArray.length);
-          for (let i = 0; i < voiceBand; i++) sum += dataArray[i];
-          let rawValue = (sum / voiceBand) / 255;
+          localAnalyser.getByteTimeDomainData(dataArray);
+          // Calculate RMS amplitude from waveform
+          let sumSq = 0;
+          for (let i = 0; i < dataArray.length; i++) {
+            const v = (dataArray[i] - 128) / 128;
+            sumSq += v * v;
+          }
+          let rawValue = Math.sqrt(sumSq / dataArray.length);
 
-          // Smooth with lerp to avoid jittery movement
-          smoothedValue += (rawValue - smoothedValue) * 0.35;
-          const mouthOpen = Math.min(1, smoothedValue * 1.8);
+          // Smooth with lerp and amplify
+          smoothedValue += (rawValue - smoothedValue) * 0.4;
+          const mouthOpen = Math.min(1, smoothedValue * 2.5);
 
-          try {
-            const coreModel = currentModel.internalModel.coreModel;
-            coreModel.setParameterValueById('ParamMouthOpenY', mouthOpen);
-          } catch (e) { /* parameter might not exist */ }
+          if (mouthParam) {
+            try {
+              const coreModel = currentModel.internalModel.coreModel;
+              coreModel.setParameterValueById(mouthParam, mouthOpen);
+            } catch (e) { /* ignore */ }
+          }
 
           requestAnimationFrame(updateMouth);
         }
@@ -210,11 +253,15 @@
           statusEl.textContent = 'connected';
           statusEl.className = 'connected';
           // Close mouth
-          try {
-            const coreModel = currentModel.internalModel.coreModel;
-            coreModel.setParameterValueById('ParamMouthOpenY', 0);
-          } catch (e) {}
+          if (mouthParam) {
+            try {
+              const coreModel = currentModel.internalModel.coreModel;
+              coreModel.setParameterValueById(mouthParam, 0);
+            } catch (e) {}
+          }
           source.disconnect();
+          localAnalyser.disconnect();
+          console.log('[live2d] Audio playback finished');
         };
       } catch (err) {
         console.error('[live2d] Audio playback error:', err);
@@ -265,6 +312,7 @@
 
         // New audio available?
         if (state.audio_version > lastAudioVersion && !isSpeaking) {
+          console.log('[live2d] New audio detected, version:', state.audio_version, 'emotion:', state.emotion);
           lastAudioVersion = state.audio_version;
           // Apply emotion before speaking
           if (state.emotion) applyEmotion(state.emotion);
@@ -273,7 +321,7 @@
           // Play audio with lip sync
           const audioUrl = `/api/live2d/audio?v=${state.audio_version}`;
           await playAudioWithLipSync(audioUrl);
-          // Hide subtitle after a delay
+          // Hide subtitle after speech + 2s delay
           setTimeout(() => showSubtitle(''), 2000);
         }
       } catch (e) {
@@ -327,12 +375,24 @@
     }
 
     // Ensure user interaction for AudioContext (browser policy)
-    document.body.addEventListener('click', () => {
+    // Listen on multiple events to maximize chance of activation
+    function activateAudio() {
       ensureAudioContext();
-      if (audioContext.state === 'suspended') audioContext.resume();
-    }, { once: true });
+      if (audioContext.state === 'suspended') {
+        audioContext.resume().then(() => {
+          console.log('[live2d] AudioContext activated');
+          statusEl.textContent = statusEl.textContent === 'connecting...' ? 'connected' : statusEl.textContent;
+        });
+      }
+    }
+    document.body.addEventListener('click', activateAudio);
+    document.body.addEventListener('keydown', activateAudio, { once: true });
 
-    window.addEventListener('DOMContentLoaded', boot);
+    window.addEventListener('DOMContentLoaded', () => {
+      boot();
+      // Try to activate immediately (works if user already interacted with the page)
+      activateAudio();
+    });
   </script>
 </body>
 </html>

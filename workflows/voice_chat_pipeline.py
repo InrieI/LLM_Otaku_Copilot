@@ -189,10 +189,31 @@ class VoiceChatWorkflow:
         self.history_store.clear(delete_screenshots=True)
         print("[system] New session started.")
 
+    # Emotion instruction appended to system prompt when Live2D is active
+    EMOTION_INSTRUCTION = (
+        "\n\n【情绪标注规则】在每句回复的最开头用方括号标注你当前的情绪，"
+        "可选标签：[neutral], [joy], [sadness], [anger], [surprise], [fear], [disgust], [smirk]。"
+        "例如：\"[joy] 当然可以啊！\"。只标注一个最主要的情绪，标签后面紧跟回复内容。"
+    )
+
+    def _is_live2d_enabled(self):
+        config_path = Path(__file__).resolve().parents[1] / "config.json"
+        if config_path.exists():
+            try:
+                cfg = json.loads(config_path.read_text(encoding="utf-8"))
+                return bool(cfg.get("live2d", {}).get("model_name"))
+            except Exception:
+                pass
+        return False
+
     def _build_messages(self, history):
         messages = []
         if self.system_prompt:
-            messages.append({"role": "system", "content": self.system_prompt})
+            prompt = self.system_prompt
+            # Auto-inject emotion tags instruction when Live2D is configured
+            if self._is_live2d_enabled():
+                prompt += self.EMOTION_INSTRUCTION
+            messages.append({"role": "system", "content": prompt})
         messages.extend(history)
         return messages
 

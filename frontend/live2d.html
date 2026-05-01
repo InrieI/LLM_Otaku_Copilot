@@ -418,17 +418,48 @@
     //  5. Model Hooks (lip sync + presets) — call on load AND after scale change
     // ============================================================
     function registerModelHooks(model) {
-      // Remove any previous listener to avoid duplicates
-      try { model.internalModel.off('beforeModelUpdate'); } catch (e) {}
+      if (!model || !model.internalModel) return;
+      
+      // Remove any previous listeners to avoid duplicates
+      try { 
+        model.internalModel.off('beforeModelUpdate'); 
+        model.internalModel.off('afterModelUpdate'); 
+      } catch (e) {}
+
+      // Log the presets we are about to apply
+      if (modelConfig && modelConfig.presets) {
+        console.log('[live2d] Registering presets:', modelConfig.presets);
+      }
+
+      // We use a combination of before and after to ensure our values "stick"
+      // even if motions try to override them.
+      const applyPresets = () => {
+        if (!modelConfig || !modelConfig.presets) return;
+        const core = model.internalModel.coreModel;
+        
+        for (const [pId, pVal] of Object.entries(modelConfig.presets)) {
+          try { 
+            // 1. Force parameter value
+            core.setParameterValueById(pId, pVal); 
+
+            // 2. Heuristic: if it's a "ParamX" toggle, try to force corresponding Part opacity too.
+            // For whitecatfree model: Param6 -> ear, Param3 -> hairF/hairB
+            if (pVal > 0) {
+              if (pId === 'Param6') try { model.internalModel.coreModel.setPartOpacityById('ear', 1); } catch(e){}
+              if (pId === 'Param3') {
+                try { model.internalModel.coreModel.setPartOpacityById('hairF', 1); } catch(e){}
+                try { model.internalModel.coreModel.setPartOpacityById('hairB', 1); } catch(e){}
+              }
+            }
+          } catch (e) {}
+        }
+      };
 
       model.internalModel.on('beforeModelUpdate', () => {
-        // 1. Apply constant presets (hair/clothes toggles)
-        if (modelConfig && modelConfig.presets) {
-          for (const [pId, pVal] of Object.entries(modelConfig.presets)) {
-            try { model.internalModel.coreModel.setParameterValueById(pId, pVal); } catch (e) {}
-          }
-        }
-        // 2. Lip sync — shotgun all known mouth params
+        // Apply presets before core update
+        applyPresets();
+
+        // Lip sync — shotgun all known mouth params
         if (isSpeaking && mouthValueForTicker > 0) {
           const allMouthParams = [
             'ParamMouthOpenY', 'PARAM_MOUTH_OPEN_Y', 'ParamMouthOpen',
@@ -438,6 +469,11 @@
             try { model.internalModel.coreModel.setParameterValueById(p, mouthValueForTicker); } catch (e) {}
           }
         }
+      });
+
+      // Also apply after to be absolutely sure motions didn't overwrite our toggles
+      model.internalModel.on('afterModelUpdate', () => {
+        applyPresets();
       });
     }
 

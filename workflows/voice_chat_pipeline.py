@@ -15,7 +15,8 @@ from tts.gpt_sovits_client import synthesize_tts
 from tts.player import apply_volume_wav, play_audio
 
 
-SYSTEM_PROMPT = "你的名字是汐，是一个慵懒且有点三无的15岁少女，你和用户是朋友关系。你不需要对他使用敬语，可以对他开玩笑互损，说话要简短，要直白，像是正常朋友之间的交流，且不许在对话中使用括号进行动作神态等的描写例如“（打了个哈欠）我在呢”"
+# 兜底人设（仅在 config.json 缺失时使用）
+DEFAULT_SYSTEM_PROMPT = "你是一个智能语音助手。"
 
 # Emotion tags the LLM can include in responses
 EMOTION_PATTERN = re.compile(r'\[(\w+)\]')
@@ -34,7 +35,7 @@ def extract_emotion(text):
 
 
 class VoiceChatWorkflow:
-    def __init__(self, output_dir=Path("outputs"), system_prompt=SYSTEM_PROMPT):
+    def __init__(self, output_dir=Path("outputs"), system_prompt=DEFAULT_SYSTEM_PROMPT):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 

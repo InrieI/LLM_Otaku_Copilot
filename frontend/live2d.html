@@ -146,6 +146,9 @@
       document.getElementById('scale-val').textContent = currentScale.toFixed(2);
       if (currentModel) {
         currentModel.scale.set(currentScale);
+        // Re-register the beforeModelUpdate hook after scale change,
+        // because pixi-live2d-display may recreate the internal model on resize.
+        registerModelHooks(currentModel);
       }
     }
 
@@ -236,29 +239,8 @@
         } catch (e) {}
 
         // === Hook into model update for proper lip sync timing ===
-        // The officially supported way in pixi-live2d-display is to listen to 'beforeModelUpdate'
-        // This fires after motions and physics, but right before coreModel.update() calculates vertices.
-        model.internalModel.on('beforeModelUpdate', () => {
-          // 1. Apply any constant presets (e.g., clothes, hair toggles)
-          if (modelConfig && modelConfig.presets) {
-            for (const [pId, pVal] of Object.entries(modelConfig.presets)) {
-              try { model.internalModel.coreModel.setParameterValueById(pId, pVal); } catch (e) {}
-            }
-          }
-
-          // 2. Apply Lip Sync using shotgun approach (blast all known mouth parameters)
-          if (isSpeaking && mouthValueForTicker > 0) {
-             const allMouthParams = [
-               'ParamMouthOpenY', 'PARAM_MOUTH_OPEN_Y', 'ParamMouthOpen', 
-               'Param_MouthOpenY', 'MouthOpen', 'ParamMouthForm'
-             ];
-             for (const p of allMouthParams) {
-                 try {
-                     model.internalModel.coreModel.setParameterValueById(p, mouthValueForTicker);
-                 } catch (e) {}
-             }
-          }
-        });
+        // Extract to a named function so it can be re-registered after scale changes.
+        registerModelHooks(model);
 
         // Start idle motion if defined
         const idleGroup = config.idleMotionGroupName || 'Idle';
@@ -433,10 +415,54 @@
     }
 
     // ============================================================
-    //  5. Expression / Emotion system
+    //  5. Model Hooks (lip sync + presets) — call on load AND after scale change
     // ============================================================
+    function registerModelHooks(model) {
+      // Remove any previous listener to avoid duplicates
+      try { model.internalModel.off('beforeModelUpdate'); } catch (e) {}
+
+      model.internalModel.on('beforeModelUpdate', () => {
+        // 1. Apply constant presets (hair/clothes toggles)
+        if (modelConfig && modelConfig.presets) {
+          for (const [pId, pVal] of Object.entries(modelConfig.presets)) {
+            try { model.internalModel.coreModel.setParameterValueById(pId, pVal); } catch (e) {}
+          }
+        }
+        // 2. Lip sync — shotgun all known mouth params
+        if (isSpeaking && mouthValueForTicker > 0) {
+          const allMouthParams = [
+            'ParamMouthOpenY', 'PARAM_MOUTH_OPEN_Y', 'ParamMouthOpen',
+            'Param_MouthOpenY', 'MouthOpen', 'ParamMouthForm'
+          ];
+          for (const p of allMouthParams) {
+            try { model.internalModel.coreModel.setParameterValueById(p, mouthValueForTicker); } catch (e) {}
+          }
+        }
+      });
+    }
+
+    // ============================================================
+    //  6. Expression / Emotion system
+    // ============================================================
+    // Helper: resolve expression identifier (filename or index) to a usable index
+    function resolveExpressionIndex(model, exprId) {
+      if (typeof exprId === 'number') return exprId;
+      // It's a filename — find its index in the model's expression list
+      try {
+        const exprs = model.internalModel.settings.expressions || [];
+        const idx = exprs.findIndex(e => {
+          const name = e.Name || e.name || e.file || '';
+          return name === exprId || name.endsWith('/' + exprId);
+        });
+        return idx >= 0 ? idx : null;
+      } catch (e) {
+        return null;
+      }
+    }
+
     function applyEmotion(emotion) {
-      if (!currentModel || emotion === currentEmotion) return;
+      if (!currentModel) return;
+      // Always update the badge, even for the same emotion
       currentEmotion = emotion;
 
       emotionEl.textContent = emotion;
@@ -444,11 +470,19 @@
       setTimeout(() => { emotionEl.className = ''; }, 3000);
 
       const emotionMap = (modelConfig && modelConfig.emotionMap) || DEFAULT_EMOTION_MAP;
-      const exprIndex = emotionMap[emotion.toLowerCase()];
-      if (exprIndex !== undefined && exprIndex !== null) {
-        try { currentModel.expression(exprIndex); } catch (e) {
-          console.warn('[live2d] Expression not available:', exprIndex);
+      const rawId = emotionMap[emotion.toLowerCase()];
+      if (rawId === undefined || rawId === null) return;
+
+      const exprIndex = resolveExpressionIndex(currentModel, rawId);
+      if (exprIndex !== null && exprIndex !== undefined) {
+        try {
+          currentModel.expression(exprIndex);
+          console.log('[live2d] Expression applied:', emotion, '->', rawId, '(index:', exprIndex, ')');
+        } catch (e) {
+          console.warn('[live2d] Expression failed:', exprIndex, e);
         }
+      } else {
+        console.warn('[live2d] Could not resolve expression for:', rawId);
       }
     }
 

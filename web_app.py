@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 import webview
 import threading
 import json
+import socket
 from pathlib import Path
 from pydantic import BaseModel
 import sys
@@ -13,7 +14,11 @@ import time
 
 from workflows import VoiceChatWorkflow
 from speech import recorder
-import keyboard
+
+try:
+    import keyboard
+except Exception:
+    keyboard = None
 
 try:
     import pyaudio
@@ -37,7 +42,6 @@ frontend_dir = Path(__file__).resolve().parent / "frontend"
 config_path = Path(__file__).resolve().parent / "config.json"
 workflow = VoiceChatWorkflow()
 wakeword_listener = None
-hotkey_handles = []
 outputs_dir = Path(__file__).resolve().parent / "outputs"
 wakeword_dataset_dir = outputs_dir / "wakeword_dataset"
 wakeword_models_dir = outputs_dir / "wakeword_models"
@@ -46,6 +50,7 @@ wakeword_sample_state = {"path": None, "label": None, "name": None}
 live2d_models_dir = Path(__file__).resolve().parent / "live2d-models"
 live2d_state = {"emotion": "neutral", "reply_text": "", "audio_version": 0}
 workflow.live2d_state = live2d_state
+hotkey_handles = []
 
 # Serve static files for frontend
 app.mount("/static", StaticFiles(directory=str(frontend_dir)), name="static")
@@ -158,8 +163,7 @@ async def save_config(request: Request):
         json.dump(data, f, indent=2, ensure_ascii=False)
     workflow.reload_config()
     wakeword_cfg = _load_wakeword_config()
-    wakeword_started = _restart_wakeword_listener(wakeword_cfg)
-    run_assistant(enable_hotkeys=not wakeword_started)
+    _restart_wakeword_listener(wakeword_cfg)
     return {"status": "success"}
 
 
@@ -393,17 +397,98 @@ async def wakeword_train(payload: WakewordTrainRequest):
     threading.Thread(target=_runner, daemon=True).start()
     return {"status": "running"}
 
+def _get_all_lan_ips():
+    """Get all available LAN IPs with adapter names, sorted by likelihood of being WiFi/Ethernet."""
+    results = []
+    seen = set()
+
+    # Method 1: Parse ipconfig for adapter names
+    adapter_ips = {}
+    try:
+        import subprocess
+        output = subprocess.check_output("ipconfig /all", shell=True, text=True, encoding="mbcs", errors="replace")
+        current_adapter = ""
+        for line in output.splitlines():
+            line = line.strip()
+            if line and not line.startswith(" ") and ("adapter" in line.lower() or "适配器" in line):
+                current_adapter = line
+            elif "IPv4" in line or "IPv4 地址" in line:
+                parts = line.split(":")
+                if len(parts) >= 2:
+                    ip = parts[-1].strip().split("(")[0].strip()
+                    if ip and ip not in seen:
+                        seen.add(ip)
+                        name = current_adapter.lower()
+                        # Prioritize: WiFi > Ethernet > others > VPN/virtual
+                        priority = 3
+                        if any(k in name for k in ("wi-fi", "wifi", "wlan", "无线")):
+                            priority = 0
+                        elif any(k in name for k in ("ethernet", "以太网")):
+                            priority = 1
+                        elif any(k in name for k in ("vpn", "vmware", "virtualbox", "hyper-v", "vethernet", "loopback")):
+                            priority = 5
+                        results.append({"ip": ip, "adapter": current_adapter, "priority": priority})
+    except Exception:
+        pass
+
+    # Method 2: socket fallback for any IPs missed
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if ip not in seen and not ip.startswith("127."):
+                seen.add(ip)
+                results.append({"ip": ip, "adapter": "unknown", "priority": 4})
+    except Exception:
+        pass
+
+    results.sort(key=lambda x: x["priority"])
+    return results
+
+
+def _get_lan_ip():
+    """Get the best LAN IP (WiFi preferred)."""
+    ips = _get_all_lan_ips()
+    for item in ips:
+        ip = item["ip"]
+        if ip.startswith(("192.168.", "10.", "172.")):
+            second = int(ip.split(".")[1]) if ip.startswith("172.") else 0
+            if not ip.startswith("172.") or 16 <= second <= 31:
+                return ip
+    return "127.0.0.1"
+
+
+@app.get("/api/network/info")
+async def network_info():
+    ip = _get_lan_ip()
+    all_ips = _get_all_lan_ips()
+    return {"ip": ip, "port": 8000, "all_ips": all_ips}
+
+
 def run_server():
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="error")
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="error")
+
+def _get_current_screenshot_mode():
+    """Read the current recording mode from config to respect the UI toggle."""
+    if not config_path.exists():
+        return False
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+        return bool(data.get("recording", {}).get("with_screenshot", False))
+    except Exception:
+        return False
+
 
 def _enable_hotkeys():
     global hotkey_handles
+    if keyboard is None:
+        print("[warning] keyboard 模块未安装，热键功能不可用")
+        return
     if hotkey_handles:
         return
-    # We redefine hotkeys here to ensure they still work while the UI is open.
+    # Both Alt+1 and Alt+2 respect the UI mode setting.
     hotkey_handles = [
-        keyboard.add_hotkey("alt+1", lambda: workflow.start_or_stop_recording(with_screenshot=False)),
-        keyboard.add_hotkey("alt+2", lambda: workflow.start_or_stop_recording(with_screenshot=True)),
+        keyboard.add_hotkey("alt+1", lambda: workflow.start_or_stop_recording(with_screenshot=_get_current_screenshot_mode())),
+        keyboard.add_hotkey("alt+2", lambda: workflow.start_or_stop_recording(with_screenshot=_get_current_screenshot_mode())),
         keyboard.add_hotkey("alt+3", workflow.force_stop_only),
         keyboard.add_hotkey("alt+0", workflow.clear_history),
     ]
@@ -412,7 +497,7 @@ def _enable_hotkeys():
 
 def _disable_hotkeys():
     global hotkey_handles
-    if not hotkey_handles:
+    if keyboard is None or not hotkey_handles:
         return
     for handle in hotkey_handles:
         try:
@@ -473,7 +558,13 @@ def _start_wakeword_listener(wakeword_cfg):
             pass
 
     cooldown_seconds = float(wakeword_cfg.get("cooldown_seconds", 2.5))
-    with_screenshot = bool(wakeword_cfg.get("with_screenshot", False))
+    # Use recording config's with_screenshot (controlled by UI toggle), not wakeword config
+    with_screenshot = False
+    try:
+        full_cfg = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+        with_screenshot = bool(full_cfg.get("recording", {}).get("with_screenshot", False))
+    except Exception:
+        pass
 
     def _on_wake():
         if recorder.recording_state.get("is_recording"):
@@ -584,10 +675,9 @@ if __name__ == "__main__":
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()
 
-    # 2. Start the core Voice Assistant workflow hotkeys or wakeword
+    # 2. Start wakeword listener if configured
     wakeword_cfg = _load_wakeword_config()
-    wakeword_started = _start_wakeword_listener(wakeword_cfg)
-    run_assistant(enable_hotkeys=not wakeword_started)
+    _start_wakeword_listener(wakeword_cfg)
 
     # pywebview *must* run in the main thread
     window = webview.create_window(

@@ -138,9 +138,9 @@ class VoiceChatWorkflow:
         if recorder.recording_state.get("is_recording"):
             if self.pending_screenshot != with_screenshot:
                 if self.pending_screenshot:
-                    print("[system] 当前是截图录音，请再按 Alt+2 结束并处理。")
+                    print("[system] 当前是截图录音，请再次点击停止并处理。")
                 else:
-                    print("[system] 当前是普通录音，请再按 Alt+1 结束并处理。")
+                    print("[system] 当前是普通录音，请再次点击停止并处理。")
                 return
             self.stop_and_process()
             return
@@ -148,18 +148,11 @@ class VoiceChatWorkflow:
         self.pending_screenshot = with_screenshot
         vad_config = self.recording_config.get("vad", {})
         input_device_index = self.recording_config.get("device_index")
-        if with_screenshot:
-            recorder.start_recording(
-                stop_hint="再次按 Alt+2 停止并处理",
-                vad_config=vad_config,
-                input_device_index=input_device_index,
-            )
-        else:
-            recorder.start_recording(
-                stop_hint="再次按 Alt+1 停止并处理",
-                vad_config=vad_config,
-                input_device_index=input_device_index,
-            )
+        recorder.start_recording(
+            stop_hint="录音中 (再次点击停止并处理)",
+            vad_config=vad_config,
+            input_device_index=input_device_index,
+        )
         self._start_vad_monitor(vad_config)
 
     def stop_and_process(self):
@@ -250,7 +243,7 @@ class VoiceChatWorkflow:
 
         if screenshot_path:
             provider = self.llm_config.provider.lower()
-            if provider in {"openai", "openai_compat", "api", "deepseek"}:
+            if provider in {"openai", "openai_compat", "api"}:
                 messages = attach_image_to_messages(messages, screenshot_path)
             else:
                 print("[warning] 当前提供商不支持图片，已忽略截图。")
@@ -265,10 +258,6 @@ class VoiceChatWorkflow:
         self.history_store.append("assistant", reply)
         self.last_reply_text_path.write_text(clean_reply, encoding="utf-8")
 
-        # Update Live2D state for the frontend display page
-        if self.live2d_state is not None:
-            self.live2d_state["emotion"] = emotion
-            self.live2d_state["reply_text"] = clean_reply
         audio_path = synthesize_tts(clean_reply, self.tts_config, self.last_reply_audio_path)
         if audio_path:
             adjusted_path = apply_volume_wav(
@@ -277,8 +266,11 @@ class VoiceChatWorkflow:
                 self.last_reply_scaled_audio_path,
             )
 
-            # Notify Live2D frontend that new audio is available
+            # Atomically update all Live2D state together so the frontend
+            # never sees new emotion/text without new audio (or vice versa)
             if self.live2d_state is not None:
+                self.live2d_state["emotion"] = emotion
+                self.live2d_state["reply_text"] = clean_reply
                 self.live2d_state["audio_version"] = self.live2d_state.get("audio_version", 0) + 1
             # Check if browser audio is enabled (Live2D page handles playback)
             browser_audio = False

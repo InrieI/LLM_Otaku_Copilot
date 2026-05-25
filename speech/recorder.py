@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import keyboard
 import pyaudio
 import time
 import wave
@@ -101,8 +100,7 @@ def start_recording(
         recording_state["vad_start_time"] = time.time()
         recording_state["vad_last_voice_time"] = recording_state["vad_start_time"]
 
-        # 创建一个"后台线程"来读取音频
-        # 这样主程序可以继续响应快捷键（按 Alt+3），不会被卡住
+        # 创建一个"后台线程"来读取音频，不会阻塞主线程
         import threading
 
         def read_audio():
@@ -180,33 +178,3 @@ def stop_recording():
     except Exception as exc:
         print(f"[error] 停止录音失败: {exc}")
         return False
-
-
-def record_with_hotkeys(filename=DEFAULT_OUTPUT):
-    """
-    启动快捷键监听，控制录音的开始和停止
-    
-    快捷键设置（演示模式）：
-    - Alt+1：开始录音
-    - Alt+3：停止录音
-    - Esc：退出程序
-    
-    参数: filename - 录音保存文件路径
-    """
-    print("按 Alt+1 开始录音")
-    print("按 Alt+3 停止录音")
-    print("按 Esc 退出程序")
-
-    # 绑定快捷键
-    # 当按下某个快捷键时，就会调用后面的函数
-    keyboard.add_hotkey("alt+1", lambda: start_recording(filename))
-    keyboard.add_hotkey("alt+3", stop_recording)
-
-    # keyboard.wait() 会让程序一直运行，直到你按下指定的键（这里是 Esc）
-    keyboard.wait("esc")
-    print("[system] 程序退出")
-
-
-# "主程序"入口：当你直接运行这个文件时会执行
-if __name__ == "__main__":
-    record_with_hotkeys()

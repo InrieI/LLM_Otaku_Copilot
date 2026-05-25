@@ -1,6 +1,5 @@
 from pathlib import Path
 from subprocess import CalledProcessError, run
-import audioop
 import getpass
 import json
 import os
@@ -330,7 +329,14 @@ def _is_audio_too_quiet(input_path: Path, min_seconds: float = 0.35, min_rms: in
             data = wf.readframes(frames)
             if not data:
                 return True
-            rms = audioop.rms(data, wf.getsampwidth())
+            sampwidth = wf.getsampwidth()
+            if sampwidth == 2:
+                samples = np.frombuffer(data, dtype=np.int16).astype(np.float64)
+            elif sampwidth == 4:
+                samples = np.frombuffer(data, dtype=np.int32).astype(np.float64)
+            else:
+                samples = np.frombuffer(data, dtype=np.uint8).astype(np.float64) - 128.0
+            rms = int(np.sqrt(np.mean(samples ** 2)))
             return rms < min_rms
     except Exception as exc:
         print(f"[warning] 音频检测失败: {exc}")

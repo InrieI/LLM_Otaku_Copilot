@@ -321,6 +321,7 @@
                       color="primary"
                       variant="flat"
                       :disabled="record.isRecording"
+                      @update:model-value="onRecordModeChange"
                       style="background-color: var(--md-sys-color-background); border: 1px solid rgba(0,0,0,0.05);"
                     >
                       <v-btn value="text" class="px-6" style="letter-spacing: 0;">
@@ -416,6 +417,12 @@
                     hide-details
                   ></v-switch>
 
+                  <div class="d-flex align-center mt-2" style="height: 40px;">
+                    <label style="cursor: pointer; user-select: none;">
+                      <input type="checkbox" id="wakeword-screenshot-cb" style="margin-right: 8px; transform: scale(1.3);"> 唤醒后截图 + 文字
+                    </label>
+                  </div>
+
                   <v-expand-transition>
                     <div v-if="config.wakeword.enabled" class="mt-4">
                       <v-row>
@@ -474,14 +481,7 @@
                                     <div class="text-body-2 mb-2" style="color: #49454F;">Cooldown Seconds (触发冷却): <b>{{ config.wakeword.cooldown_seconds }}</b></div>
                                     <v-slider v-model="config.wakeword.cooldown_seconds" min="0.5" max="6.0" step="0.5" color="primary" track-color="primary-container" hide-details></v-slider>
                                   </v-col>
-                                  <v-col cols="12" md="6">
-                                    <v-switch
-                                      v-model="config.wakeword.with_screenshot"
-                                      label="唤醒后截图 + 文字"
-                                      color="primary"
-                                      hide-details
-                                    ></v-switch>
-                                  </v-col>
+
 
                                   <v-col cols="12" v-if="config.wakeword.mode === 'custom'" class="mt-4">
                                     <div class="d-flex align-center flex-wrap" style="gap: 12px;">
@@ -702,10 +702,43 @@
                       <p class="text-caption mt-1" style="color: #6b7280;">开启后 TTS 音频将由 Live2D 页面播放并驱动口型，本地不再播放。</p>
                     </v-col>
                     <v-col cols="12">
-                      <v-btn color="primary" variant="flat" @click="openLive2DPage">
-                        <span class="material-symbols-outlined mr-2" style="font-size: 20px !important;">open_in_new</span>
-                        打开 Live2D 页面
-                      </v-btn>
+                      <v-btn-toggle
+                        mandatory
+                        rounded="pill"
+                        color="primary"
+                        variant="flat"
+                        style="background-color: var(--md-sys-color-background); border: 1px solid rgba(0,0,0,0.05);"
+                      >
+                        <v-btn value="desktop" class="px-6" style="letter-spacing: 0;" @click="openLive2DPage">
+                          <span class="material-symbols-outlined" style="font-size: 20px; margin-right: 6px;">computer</span>
+                          电脑端打开
+                        </v-btn>
+                        <v-btn value="mobile" class="px-6" style="letter-spacing: 0;" @click="openLive2DMobile">
+                          <span class="material-symbols-outlined" style="font-size: 20px; margin-right: 6px;">phone_android</span>
+                          手机端打开
+                        </v-btn>
+                      </v-btn-toggle>
+                    </v-col>
+                    <v-col cols="12" v-if="mobileQR.show">
+                      <v-card flat class="pa-4 mt-2" style="border-radius: 12px; border: 1px solid rgba(0,0,0,0.08); max-width: 400px; background: var(--md-sys-color-background);">
+                        <v-select
+                          v-if="mobileQR.allIPs.length > 1"
+                          v-model="mobileQR.selectedIP"
+                          :items="mobileQR.allIPs"
+                          item-title="label"
+                          item-value="ip"
+                          label="选择网卡 IP"
+                          variant="outlined"
+                          density="compact"
+                          hide-details
+                          class="mb-3"
+                          @update:modelValue="onMobileIPChange"
+                        ></v-select>
+                        <div class="text-body-2 mb-2" style="color: #49454F;">手机浏览器扫描二维码或访问：</div>
+                        <div class="text-body-1 mb-3" style="color: #1976D2; word-break: break-all;">{{ mobileQR.url }}</div>
+                        <div id="qr-container" style="display: flex; justify-content: center;"></div>
+                        <p class="text-caption mt-2" style="color: #6b7280;">确保手机和电脑在同一 WiFi 网络下。</p>
+                      </v-card>
                     </v-col>
                   </v-row>
                 </v-card-text>
@@ -765,6 +798,7 @@
 
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/vuetify@3.3.15/dist/vuetify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script>
     const { createApp, ref, onMounted, watch } = Vue;
     const { createVuetify } = Vuetify;
@@ -810,6 +844,7 @@
             stt: { provider: 'local', local: {}, groq: {} },
             recording: {
               device_index: null,
+              with_screenshot: false,
               vad: {
                 enabled: true,
                 silence_seconds: 1.2,
@@ -862,17 +897,30 @@
         const wakewordModels = ref([]);
         const customWakewordModels = ref([]);
         const live2dModels = ref([]);
+        const mobileQR = ref({ show: false, url: '', allIPs: [], selectedIP: '', port: 8000 });
         const samplesDialog = ref({ show: false, tab: 'positive', positive: [], negative: [] });
+
+        // Deep merge that preserves Vue reactive proxies on nested objects
+        function mergeIntoReactive(target, source) {
+          for (const key of Object.keys(source)) {
+            const sv = source[key];
+            const tv = target[key];
+            if (sv && typeof sv === 'object' && !Array.isArray(sv) && tv && typeof tv === 'object' && !Array.isArray(tv)) {
+              mergeIntoReactive(tv, sv);
+            } else {
+              target[key] = sv;
+            }
+          }
+        }
 
         const loadConfig = async () => {
             const res = await fetch('/api/config');
             if (res.ok) {
                 const data = await res.json();
                 if (!data.tts.history) data.tts.history = [];
-                // merge into current ref to maintain reactive properties nicely
-                Object.assign(config.value, data);
+                mergeIntoReactive(config.value, data);
                 if (!config.value.recording) {
-                  config.value.recording = { device_index: null, vad: { enabled: true, silence_seconds: 1.2, min_record_seconds: 0.8, aggressiveness: 2, frame_ms: 30 } };
+                  config.value.recording = { device_index: null, with_screenshot: false, vad: { enabled: true, silence_seconds: 1.2, min_record_seconds: 0.8, aggressiveness: 2, frame_ms: 30 } };
                 }
                 if (!config.value.recording.vad) {
                   config.value.recording.vad = { enabled: true, silence_seconds: 1.2, min_record_seconds: 0.8, aggressiveness: 2, frame_ms: 30 };
@@ -880,6 +928,7 @@
                 if (typeof config.value.recording.device_index !== 'number') {
                   config.value.recording.device_index = null;
                 }
+                record.value.mode = config.value.recording.with_screenshot ? 'screenshot' : 'text';
                 if (!config.value.wakeword) {
                   config.value.wakeword = { enabled: false, mode: 'openwakeword', model: 'hey_jarvis', custom_name: 'shizuku', threshold: 0.6, cooldown_seconds: 2.5, record_seconds: 6, with_screenshot: false };
                 }
@@ -892,7 +941,6 @@
                 if (!config.value.live2d) {
                   config.value.live2d = { model_name: '', browser_audio: false };
                 }
-                
                 // Ensure providers have keys array populated
                 ['gemini', 'openai_compat', 'deepseek'].forEach(p => {
                   if (!config.value.providers) config.value.providers = {};
@@ -900,6 +948,9 @@
                   if (!config.value.providers[p].keys) config.value.providers[p].keys = [];
                   if (config.value.providers[p].keys.length === 0) config.value.providers[p].keys.push('');
                 });
+                // Sync checkbox DOM state from config
+                const cb = document.getElementById('wakeword-screenshot-cb');
+                if (cb) cb.checked = !!config.value.wakeword.with_screenshot;
             }
         };
 
@@ -914,6 +965,48 @@
 
         const openLive2DPage = () => {
             window.open('/live2d', '_blank');
+        };
+
+        let qrInstance = null;
+        function renderQR(url) {
+            const container = document.getElementById('qr-container');
+            if (!container) return;
+            container.innerHTML = '';
+            qrInstance = new QRCode(container, {
+                text: url,
+                width: 200,
+                height: 200,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+            });
+        }
+
+        const openLive2DMobile = async () => {
+            try {
+                const res = await fetch('/api/network/info');
+                const data = await res.json();
+                const port = data.port;
+                const allIPs = (data.all_ips || []).map(item => ({
+                    ip: item.ip,
+                    label: `${item.ip}  (${item.adapter || item.ip})`
+                }));
+                const selectedIP = data.ip;
+                const url = `http://${selectedIP}:${port}/live2d`;
+                mobileQR.value = { show: true, url, allIPs, selectedIP, port };
+                await Vue.nextTick();
+                renderQR(url);
+            } catch (e) {
+                snackbar.value = { show: true, text: '获取网络信息失败' };
+            }
+        };
+
+        const onMobileIPChange = async (newIP) => {
+            const port = mobileQR.value.port;
+            const url = `http://${newIP}:${port}/live2d`;
+            mobileQR.value.url = url;
+            mobileQR.value.selectedIP = newIP;
+            await Vue.nextTick();
+            renderQR(url);
         };
 
         const loadWakewordModels = async () => {
@@ -1052,6 +1145,10 @@
 
         const saveConfig = async () => {
             try {
+                // Read with_screenshot directly from DOM checkbox
+                const cb = document.getElementById('wakeword-screenshot-cb');
+                if (cb) config.value.wakeword.with_screenshot = cb.checked;
+                config.value.recording.with_screenshot = record.value.mode === 'screenshot';
                 await fetch('/api/config', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1097,6 +1194,10 @@
           } finally {
             record.value.busy = false;
           }
+        };
+
+        const onRecordModeChange = (val) => {
+          config.value.recording.with_screenshot = val === 'screenshot';
         };
 
         const cancelRecording = async () => {
@@ -1158,7 +1259,17 @@
           refreshWakewordStats();
           refreshWakewordTrainingStatus();
           loadLive2DModels();
+          // Attach change listener to wakeword screenshot checkbox to sync state immediately
+          setTimeout(() => {
+            const cb = document.getElementById('wakeword-screenshot-cb');
+            if (cb) {
+              cb.addEventListener('change', function() {
+                config.value.wakeword.with_screenshot = this.checked;
+              });
+            }
+          }, 1000);
         });
+
 
         // Add a small helper to format labels (e.g. Whispers vs local provider values if needed)
         // But since we bind directly to 'local', vuetify btn-toggle handles it perfectly.
@@ -1181,6 +1292,7 @@
           toggleRecording,
           cancelRecording,
           clearHistory,
+          onRecordModeChange,
           refreshWakewordStats,
           openSampleManager,
           deleteSample,
@@ -1189,7 +1301,10 @@
           stopWakewordSample,
           trainWakeword,
           live2dModels,
-          openLive2DPage
+          openLive2DPage,
+          mobileQR,
+          openLive2DMobile,
+          onMobileIPChange
         };
       }
     });

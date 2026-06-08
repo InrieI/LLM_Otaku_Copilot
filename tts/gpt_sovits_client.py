@@ -66,12 +66,22 @@ def synthesize_tts(text, tts_config, output_path):
     payload["text"] = text
     payload.pop("base_url", None)
 
-    response = requests.post(url, json=payload, timeout=120)
-    if response.status_code != 200:
-        print(f"[error] TTS failed: {response.status_code} {response.text}")
-        return None
+    try:
+        response = requests.post(url, json=payload, timeout=120)
+        if response.status_code != 200:
+            print(f"[error] TTS failed: {response.status_code} {response.text}")
+            return None
 
-    saved = _save_audio_from_response(response, output_path)
-    if not saved:
-        print("[error] Failed to parse TTS response.")
-    return saved
+        saved = _save_audio_from_response(response, output_path)
+        if not saved:
+            print("[error] Failed to parse TTS response.")
+        return saved
+    except requests.exceptions.ConnectionError:
+        print("[warning] TTS service not available (GPT-SoVITS not running). Skipping audio.")
+        return None
+    except requests.exceptions.Timeout:
+        print("[warning] TTS request timed out. Skipping audio.")
+        return None
+    except Exception as e:
+        print(f"[warning] TTS error: {e}. Skipping audio.")
+        return None

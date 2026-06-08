@@ -1,0 +1,96 @@
+{
+  "provider": "openai_compat",
+  "model": "gpt-4.1",
+  "system_prompt": "你的名字是Shizuku，是一个慵懒且有点三无的少女，你和用户是朋友关系。你不需要对他使用敬语，可以对他开玩笑互损，说话要简短，要直白，像是正常朋友之间的交流。不许在对话中使用括号进行对自己的动作神态等的描写",
+  "openai_base_url": "https://models.github.ai/inference",
+  "deepseek_base_url": "https://api.deepseek.com",
+  "ollama_url": "http://localhost:11434",
+  "providers": {
+    "gemini": {
+      "keys": [""],
+      "last_used": 0
+    },
+    "openai_compat": {
+      "keys": ["你的GitHub_PAT_Token"],
+      "last_used": 0
+    },
+    "deepseek": {
+      "keys": [""],
+      "last_used": 0
+    }
+  },
+  "stt": {
+    "provider": "local",
+    "language": "zh",
+    "local": {
+      "model_name": "medium",
+      "device": "cpu",
+      "compute_type": "int8"
+    },
+    "groq": {
+      "model": "whisper-large-v3",
+      "temperature": 0.0,
+      "response_format": "verbose_json",
+      "api_key": ""
+    }
+  },
+  "recording": {
+    "device_index": null,
+    "with_screenshot": false,
+    "vad": {
+      "enabled": true,
+      "silence_seconds": 1.2,
+      "min_record_seconds": 0.8,
+      "aggressiveness": 2,
+      "frame_ms": 30,
+      "energy_threshold": 300
+    }
+  },
+  "wakeword": {
+    "enabled": false,
+    "mode": "custom",
+    "model": "alexa",
+    "custom_name": "shizuku",
+    "threshold": 0.97,
+    "cooldown_seconds": 2.5,
+    "record_seconds": 6,
+    "with_screenshot": false
+  },
+  "tts": {
+    "ref_audio_path": "",
+    "aux_ref_audio_paths": [],
+    "prompt_text": "",
+    "history": [],
+    "volume": 0.7,
+    "speed_factor": 1,
+    "temperature": 1,
+    "top_p": 1,
+    "top_k": 30,
+    "repetition_penalty": 1.35,
+    "text_split_method": "cut3",
+    "batch_size": 1,
+    "batch_threshold": 0.75,
+    "split_bucket": true,
+    "sample_steps": 32,
+    "fragment_interval": 0.3,
+    "parallel_infer": true,
+    "super_sampling": false,
+    "streaming_mode": false,
+    "base_url": "http://127.0.0.1:9880",
+    "text_lang": "zh",
+    "prompt_lang": "ja",
+    "seed": -1,
+    "media_type": "wav",
+    "overlap_length": 2,
+    "min_chunk_length": 16
+  },
+  "live2d": {
+    "model_name": "whitecatfree_vts",
+    "browser_audio": true,
+    "display_mode": "live2d",
+    "character_name": "",
+    "galgame_width": 700,
+    "galgame_height": 900,
+    "model_overrides": {}
+  }
+}

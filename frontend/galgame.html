@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>立绘模式</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    background: transparent;
+    font-family: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+    user-select: none;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+  }
+
+  /* 立绘 */
+  #portrait {
+    position: fixed;
+    bottom: 160px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-height: 70vh;
+    max-width: 90vw;
+    object-fit: contain;
+    transition: opacity 0.35s ease;
+    z-index: 1;
+  }
+  #portrait.hidden { display: none; }
+  #portrait.fade-out { opacity: 0; }
+  #portrait.fade-in  { opacity: 1; }
+
+  /* 对话框 */
+  #dialogue-wrap {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    z-index: 10;
+    padding: 0 20px 14px;
+  }
+  #dialogue-box {
+    max-width: 960px;
+    margin: 0 auto;
+    background: rgba(0, 0, 0, 0.85);
+    border-radius: 12px;
+    padding: 16px 22px;
+    min-height: 80px;
+  }
+  #char-name {
+    font-size: 16px;
+    font-weight: 700;
+    color: #66ccff;
+    margin-bottom: 6px;
+  }
+  #dialogue-text {
+    font-size: 15px;
+    line-height: 1.8;
+    color: #e0e0e0;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  #no-character {
+    position: fixed; inset: 0;
+    z-index: 100;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0,0,0,0.7);
+    color: #888;
+    font-size: 18px;
+    text-align: center;
+  }
+  #no-character.hidden { display: none; }
+</style>
+</head>
+<body>
+
+<img id="portrait" class="hidden fade-in" src="" alt="">
+
+<div id="dialogue-wrap">
+  <div id="dialogue-box">
+    <div id="char-name"></div>
+    <div id="dialogue-text"></div>
+  </div>
+</div>
+
+<div id="no-character" class="hidden">
+  <div><p>未找到角色</p><p style="font-size:13px;color:#666;">请先在 characters/ 目录下创建角色文件夹</p></div>
+</div>
+
+<script>
+(function() {
+  let lastAudioVersion = 0;
+  let characterImages = {};
+  let currentEmotion = 'neutral';
+  let audioCtx = null;
+  let gainNode = null;
+  let currentSource = null;
+
+  const portrait = document.getElementById('portrait');
+  const charName = document.getElementById('char-name');
+  const dialogueText = document.getElementById('dialogue-text');
+  const noCharDiv = document.getElementById('no-character');
+
+  const params = new URLSearchParams(window.location.search);
+  const selectedCharacter = params.get('character') || '';
+
+  function ensureAudioContext() {
+    if (audioCtx) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    gainNode = audioCtx.createGain();
+    gainNode.gain.value = 1.0;
+    gainNode.connect(audioCtx.destination);
+  }
+  function resumeAudioContext() {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function pickRandom(arr) {
+    if (!arr || arr.length === 0) return null;
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  function showEmotion(emotion) {
+    const variants = characterImages[emotion] || characterImages['neutral'];
+    const url = pickRandom(variants);
+    if (!url) return;
+    portrait.classList.remove('fade-in');
+    portrait.classList.add('fade-out');
+    setTimeout(() => {
+      portrait.onload = () => {
+        portrait.classList.remove('fade-out', 'hidden');
+        portrait.classList.add('fade-in');
+      };
+      portrait.onerror = () => portrait.classList.add('hidden');
+      portrait.src = url;
+    }, 250);
+  }
+
+  function playAudio(audioUrl) {
+    ensureAudioContext();
+    resumeAudioContext();
+    if (currentSource) { try { currentSource.stop(); } catch(e) {} currentSource = null; }
+    fetch(audioUrl)
+      .then(r => { if (!r.ok) throw new Error('no audio'); return r.arrayBuffer(); })
+      .then(buf => audioCtx.decodeAudioData(buf))
+      .then(audioBuffer => {
+        const source = audioCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(gainNode);
+        currentSource = source;
+        source.onended = () => { currentSource = null; };
+        source.start(0);
+        setTimeout(() => { if (currentSource === source) { try { source.stop(); } catch(e) {} } }, (audioBuffer.duration + 3) * 1000);
+      })
+      .catch(() => {});
+  }
+
+  function pollState() {
+    fetch('/api/live2d/state')
+      .then(r => r.json())
+      .then(state => {
+        if (state.audio_version > lastAudioVersion) {
+          lastAudioVersion = state.audio_version;
+          if (state.emotion && state.emotion !== currentEmotion) {
+            currentEmotion = state.emotion;
+            showEmotion(currentEmotion);
+          }
+          if (state.reply_text) dialogueText.textContent = state.reply_text;
+          playAudio('/api/live2d/audio?v=' + state.audio_version);
+        }
+      })
+      .catch(() => {});
+  }
+
+  function init() {
+    fetch('/api/characters')
+      .then(r => r.json())
+      .then(data => {
+        const chars = data.characters || [];
+        let char = null;
+        if (selectedCharacter) char = chars.find(c => c.name === selectedCharacter);
+        if (!char && chars.length > 0) char = chars[0];
+        if (!char) { noCharDiv.classList.remove('hidden'); return; }
+
+        characterImages = char.images;
+        charName.textContent = char.name;
+        dialogueText.textContent = '...';
+        showEmotion('neutral');
+
+        fetch('/api/live2d/state').then(r => r.json()).then(s => { lastAudioVersion = s.audio_version || 0; });
+        setInterval(pollState, 500);
+      })
+      .catch(() => { noCharDiv.classList.remove('hidden'); });
+  }
+
+  document.addEventListener('pointerdown', resumeAudioContext, { once: true });
+  document.addEventListener('DOMContentLoaded', init);
+})();
+</script>
+</body>
+</html>

@@ -48,6 +48,7 @@ wakeword_models_dir = outputs_dir / "wakeword_models"
 wakeword_training_state = {"status": "idle", "message": "", "name": ""}
 wakeword_sample_state = {"path": None, "label": None, "name": None}
 live2d_models_dir = Path(__file__).resolve().parent / "live2d-models"
+characters_dir = Path(__file__).resolve().parent / "characters"
 live2d_state = {"emotion": "neutral", "reply_text": "", "audio_version": 0}
 workflow.live2d_state = live2d_state
 hotkey_handles = []
@@ -58,6 +59,10 @@ app.mount("/static", StaticFiles(directory=str(frontend_dir)), name="static")
 # Serve Live2D model files
 if live2d_models_dir.exists():
     app.mount("/live2d-models", StaticFiles(directory=str(live2d_models_dir)), name="live2d-models")
+
+# Serve character portrait files
+if characters_dir.exists():
+    app.mount("/characters", StaticFiles(directory=str(characters_dir)), name="characters")
 
 @app.get("/", response_class=HTMLResponse)
 async def get_index():
@@ -72,6 +77,59 @@ async def get_live2d():
         return HTMLResponse("<h1>live2d.html not found</h1>", status_code=404)
     with open(live2d_html, "r", encoding="utf-8") as f:
         return f.read()
+
+
+@app.get("/galgame", response_class=HTMLResponse)
+async def get_galgame():
+    galgame_html = frontend_dir / "galgame.html"
+    if not galgame_html.exists():
+        return HTMLResponse("<h1>galgame.html not found</h1>", status_code=404)
+    with open(galgame_html, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def _scan_characters():
+    """Scan characters/ for subdirectories containing emotion images.
+
+    Supports single images (joy.png) and numbered variants (joy1.png, joy2.png, ...).
+    Returns {name, images: {emotion: [url, ...]}}.
+    """
+    import re as _re
+    result = []
+    if not characters_dir.exists():
+        return result
+    known_emotions = {"neutral", "joy", "sadness", "anger", "surprise", "fear", "disgust", "smirk"}
+    for child in sorted(characters_dir.iterdir()):
+        if not child.is_dir():
+            continue
+        images = {}
+        for f in child.iterdir():
+            if not f.is_file():
+                continue
+            ext = f.suffix.lower().lstrip(".")
+            if ext not in ("png", "jpg", "jpeg", "webp", "avif", "gif"):
+                continue
+            stem = f.stem  # e.g. "joy", "joy1", "joy2"
+            # Match emotion name + optional number suffix
+            m = _re.match(r'^([a-z]+)(\d*)$', stem)
+            if not m:
+                continue
+            emo = m.group(1)
+            if emo not in known_emotions:
+                continue
+            url = f"/characters/{child.name}/{f.name}"
+            images.setdefault(emo, []).append(url)
+        if images:
+            # Sort each emotion's variants for stable order
+            for emo in images:
+                images[emo].sort()
+            result.append({"name": child.name, "images": images})
+    return result
+
+
+@app.get("/api/characters")
+async def list_characters():
+    return {"characters": _scan_characters()}
 
 
 def _scan_live2d_models():
@@ -661,6 +719,284 @@ def _stop_wakeword_listener():
 def _restart_wakeword_listener(wakeword_cfg):
     _stop_wakeword_listener()
     return _start_wakeword_listener(wakeword_cfg)
+
+
+galgame_window = None
+
+
+def _open_galgame_window(character_name=""):
+    """Open a transparent frameless PyQt5 window for Galgame display."""
+    import sys as _sys
+    import random
+    import urllib.request
+    import io as _io
+    import json as _json
+    import tempfile
+    import os
+
+    # 必须在主线程创建 QApplication
+    from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QGraphicsDropShadowEffect
+    from PyQt5.QtCore import Qt, QTimer, QPoint
+    from PyQt5.QtGui import QPixmap, QImage, QPainter, QColor, QFont, QPainterPath, QBrush, QPen
+
+    # ── 加载角色数据 ──
+    images_map = {}
+    display_name = character_name
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8000/api/characters") as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+        chars = data.get("characters", [])
+        char = None
+        if character_name:
+            char = next((c for c in chars if c["name"] == character_name), None)
+        if not char and chars:
+            char = chars[0]
+        if char:
+            images_map = char["images"]
+            display_name = char["name"]
+    except Exception as e:
+        print(f"[galgame] 获取角色失败: {e}")
+        return
+
+    if not images_map:
+        print("[galgame] 未找到角色或角色无图片")
+        return
+
+    # ── 创建应用 ──
+    app = QApplication.instance() or QApplication(_sys.argv)
+
+    # ── 预加载图片为 QPixmap（必须在 QApplication 之后）──
+    pixmaps = {}  # {emotion: [QPixmap, ...]}
+
+    def _load_pixmap(url_path):
+        full_url = f"http://127.0.0.1:8000{url_path}"
+        try:
+            with urllib.request.urlopen(full_url) as resp:
+                data = resp.read()
+            img = QImage()
+            img.loadFromData(data)
+            if img.isNull():
+                return None
+            max_h = 650
+            if img.height() > max_h:
+                img = img.scaledToHeight(max_h, Qt.SmoothTransformation)
+            return QPixmap.fromImage(img)
+        except Exception:
+            return None
+
+    for emo, urls in images_map.items():
+        pixmaps[emo] = []
+        for url in urls:
+            pm = _load_pixmap(url)
+            if pm:
+                pixmaps[emo].append(pm)
+
+    class GalgameWindow(QWidget):
+        def __init__(self):
+            super().__init__()
+            self.setWindowFlags(
+                Qt.FramelessWindowHint |
+                Qt.WindowStaysOnTopHint |
+                Qt.Tool
+            )
+            self.setAttribute(Qt.WA_TranslucentBackground)
+
+            # 从 config 读取尺寸，默认 700x900
+            _cfg_path = Path(__file__).resolve().parent / "config.json"
+            _w, _h = 700, 900
+            try:
+                if _cfg_path.exists():
+                    _cfg = json.loads(_cfg_path.read_text(encoding="utf-8"))
+                    _l2d = _cfg.get("live2d", {})
+                    _w = int(_l2d.get("galgame_width", 700))
+                    _h = int(_l2d.get("galgame_height", 900))
+            except Exception:
+                pass
+            self.win_w = max(400, min(_w, 2000))
+            self.win_h = max(500, min(_h, 2000))
+            self.setFixedSize(self.win_w, self.win_h)
+
+            # 居中
+            screen = app.primaryScreen().geometry()
+            self.move(
+                (screen.width() - self.win_w) // 2,
+                (screen.height() - self.win_h) // 2
+            )
+
+            # 状态
+            self.last_version = 0
+            self.current_emotion = "neutral"
+            self.reply_text = "..."
+            self.portrait_pm = None
+            self._drag_pos = None
+
+            # 轮询定时器
+            self.poll_timer = QTimer(self)
+            self.poll_timer.timeout.connect(self._poll)
+            self.poll_timer.start(500)
+
+            # 初始立绘
+            self._show_emotion("neutral")
+
+            # 获取初始 version
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:8000/api/live2d/state") as resp:
+                    s = _json.loads(resp.read().decode("utf-8"))
+                    self.last_version = s.get("audio_version", 0)
+            except Exception:
+                pass
+
+        def _show_emotion(self, emotion):
+            variants = pixmaps.get(emotion) or pixmaps.get("neutral")
+            if not variants:
+                return
+            self.portrait_pm = random.choice(variants)
+            self.current_emotion = emotion
+            self.update()
+
+        def _poll(self):
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:8000/api/live2d/state") as resp:
+                    state = _json.loads(resp.read().decode("utf-8"))
+                ver = state.get("audio_version", 0)
+                if ver > self.last_version:
+                    self.last_version = ver
+                    emo = state.get("emotion", "neutral")
+                    if emo != self.current_emotion:
+                        self._show_emotion(emo)
+                    rt = state.get("reply_text", "")
+                    if rt:
+                        self.reply_text = rt
+                        self.update()
+                    self._play_audio(ver)
+            except Exception:
+                pass
+
+        def _play_audio(self, version):
+            def _do():
+                try:
+                    url = f"http://127.0.0.1:8000/api/live2d/audio?v={version}"
+                    with urllib.request.urlopen(url) as resp:
+                        data = resp.read()
+                    tmp = os.path.join(tempfile.gettempdir(), "galgame_audio.wav")
+                    with open(tmp, "wb") as f:
+                        f.write(data)
+                    import winsound
+                    winsound.PlaySound(tmp, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                except Exception:
+                    pass
+            import threading
+            threading.Thread(target=_do, daemon=True).start()
+
+        # ── 绘制 ──
+        def paintEvent(self, event):
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+
+            # 立绘
+            if self.portrait_pm and not self.portrait_pm.isNull():
+                pm = self.portrait_pm
+                # 底部对齐到对话框上方
+                box_h = 130
+                box_margin = 14
+                avail_h = self.win_h - box_h - box_margin * 2
+                # 缩放
+                scaled = pm.scaled(
+                    self.win_w - 40, avail_h,
+                    Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                # 居中，底部留出对话框空间
+                px = (self.win_w - scaled.width()) // 2
+                py = avail_h - scaled.height() + box_margin
+                painter.drawPixmap(px, py, scaled)
+
+            # 对话框背景（圆角）
+            box_x = 14
+            box_y = self.win_h - 130 - 14
+            box_w = self.win_w - box_x * 2
+            box_h = 130
+            radius = 16
+
+            path = QPainterPath()
+            path.addRoundedRect(float(box_x), float(box_y), float(box_w), float(box_h), radius, radius)
+
+            # 半透明深色填充
+            painter.fillPath(path, QBrush(QColor(15, 15, 30, 210)))
+
+            # 细边框
+            pen = QPen(QColor(255, 255, 255, 25))
+            pen.setWidth(1)
+            painter.setPen(pen)
+            painter.drawPath(path)
+
+            # 角色名
+            painter.setPen(QColor(102, 204, 255))
+            name_font = QFont("Microsoft YaHei", 14)
+            name_font.setBold(True)
+            painter.setFont(name_font)
+            painter.drawText(box_x + 18, box_y + 28, display_name)
+
+            # 对话文字
+            painter.setPen(QColor(224, 224, 224))
+            text_font = QFont("Microsoft YaHei", 12)
+            painter.setFont(text_font)
+            text_rect = painter.boundingRect(
+                box_x + 18, box_y + 42, box_w - 36, box_h - 52,
+                Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop,
+                self.reply_text
+            )
+            painter.drawText(text_rect, Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop, self.reply_text)
+
+            painter.end()
+
+        # ── 拖拽 ──
+        def mousePressEvent(self, event):
+            if event.button() == Qt.LeftButton:
+                self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
+                event.accept()
+
+        def mouseMoveEvent(self, event):
+            if self._drag_pos and event.buttons() & Qt.LeftButton:
+                self.move(event.globalPos() - self._drag_pos)
+                event.accept()
+
+        def mouseReleaseEvent(self, event):
+            self._drag_pos = None
+
+        # ── 右键关闭 ──
+        def contextMenuEvent(self, event):
+            self.close()
+
+        # ── ESC 关闭 ──
+        def keyPressEvent(self, event):
+            if event.key() == Qt.Key_Escape:
+                self.close()
+
+    win = GalgameWindow()
+    win.show()
+
+    # 用 processEvents 循环代替 exec_()，避免阻塞线程
+    while win.isVisible():
+        app.processEvents()
+        time.sleep(0.016)  # ~60fps
+
+
+@app.post("/api/galgame/open")
+async def open_galgame_window(request: Request):
+    global galgame_window
+    data = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    character = data.get("character", "")
+
+    def _run():
+        try:
+            _open_galgame_window(character)
+        except Exception as e:
+            print(f"[galgame] 窗口错误: {e}")
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "ok"}
+
 
 if __name__ == "__main__":
     if not frontend_dir.exists():

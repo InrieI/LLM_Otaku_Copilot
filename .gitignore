@@ -9,6 +9,9 @@ set.txt
 # Live2D models (large binary, user-specific)
 live2d-models/
 
+# Character portrait images (user-specific)
+characters/
+
 # Python caches and bytecode
 __pycache__/
 *.py[cod]

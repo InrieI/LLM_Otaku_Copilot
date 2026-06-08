@@ -193,12 +193,18 @@ class VoiceChatWorkflow:
         "每条回复必须且只能以一个方括号情绪标签开头，标签后面紧跟正文内容。绝对不要省略情绪标签。"
     )
 
-    def _is_live2d_enabled(self):
+    def _is_display_enabled(self):
+        """Check if any display mode (Live2D or Galgame) is active, requiring emotion tags."""
         config_path = Path(__file__).resolve().parents[1] / "config.json"
         if config_path.exists():
             try:
                 cfg = json.loads(config_path.read_text(encoding="utf-8"))
-                return bool(cfg.get("live2d", {}).get("model_name"))
+                live2d_cfg = cfg.get("live2d", {})
+                display_mode = live2d_cfg.get("display_mode", "")
+                if display_mode in ("live2d", "galgame"):
+                    return True
+                # 向后兼容：没有 display_mode 字段时，检查 model_name
+                return bool(live2d_cfg.get("model_name"))
             except Exception:
                 pass
         return False
@@ -207,8 +213,8 @@ class VoiceChatWorkflow:
         messages = []
         if self.system_prompt:
             prompt = self.system_prompt
-            # Auto-inject emotion tags instruction when Live2D is configured
-            if self._is_live2d_enabled():
+            # Auto-inject emotion tags instruction when any display mode is configured
+            if self._is_display_enabled():
                 prompt += self.EMOTION_INSTRUCTION
             messages.append({"role": "system", "content": prompt})
         messages.extend(history)
@@ -260,11 +266,36 @@ class VoiceChatWorkflow:
 
         audio_path = synthesize_tts(clean_reply, self.tts_config, self.last_reply_audio_path)
         if audio_path:
-            adjusted_path = apply_volume_wav(
-                audio_path,
-                self.tts_config.get("volume", 1.0),
-                self.last_reply_scaled_audio_path,
-            )
+            # Check if browser audio is enabled (Live2D/Galgame page handles playback)
+            browser_audio = False
+            try:
+                cfg_path = Path(__file__).resolve().parents[1] / "config.json"
+                if cfg_path.exists():
+                    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+                    live2d_cfg = cfg.get("live2d", {})
+                    browser_audio = live2d_cfg.get("browser_audio", False)
+                    # Galgame 模式下也由浏览器播放音频
+                    if live2d_cfg.get("display_mode") == "galgame":
+                        browser_audio = True
+            except Exception:
+                pass
+
+            # When browser handles audio, serve full-amplitude WAV so the
+            # AnalyserNode can read proper amplitude for lip sync.
+            # Browser controls playback volume via gainNode.
+            if browser_audio:
+                adjusted_path = audio_path
+                # Remove stale scaled file so /api/live2d/audio serves the original
+                try:
+                    self.last_reply_scaled_audio_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            else:
+                adjusted_path = apply_volume_wav(
+                    audio_path,
+                    self.tts_config.get("volume", 1.0),
+                    self.last_reply_scaled_audio_path,
+                )
 
             # Atomically update all Live2D state together so the frontend
             # never sees new emotion/text without new audio (or vice versa)
@@ -272,15 +303,6 @@ class VoiceChatWorkflow:
                 self.live2d_state["emotion"] = emotion
                 self.live2d_state["reply_text"] = clean_reply
                 self.live2d_state["audio_version"] = self.live2d_state.get("audio_version", 0) + 1
-            # Check if browser audio is enabled (Live2D page handles playback)
-            browser_audio = False
-            try:
-                cfg_path = Path(__file__).resolve().parents[1] / "config.json"
-                if cfg_path.exists():
-                    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-                    browser_audio = cfg.get("live2d", {}).get("browser_audio", False)
-            except Exception:
-                pass
 
             if not browser_audio:
                 play_audio(adjusted_path)

@@ -669,15 +669,39 @@
                 </v-expansion-panel>
               </v-expansion-panels>
             </v-col>
-            <!-- Live2D Section -->
+            <!-- Display Mode Section -->
             <v-col cols="12">
               <v-card class="md3-card" flat>
                 <v-card-text>
                   <div class="section-title">
-                    <span class="material-symbols-outlined">face</span> Live2D
+                    <span class="material-symbols-outlined">face</span> 显示模式
                   </div>
 
+                  <!-- 模式切换 -->
                   <v-row>
+                    <v-col cols="12">
+                      <v-btn-toggle
+                        v-model="config.live2d.display_mode"
+                        mandatory
+                        rounded="pill"
+                        color="primary"
+                        variant="flat"
+                        style="background-color: var(--md-sys-color-background); border: 1px solid rgba(0,0,0,0.05);"
+                      >
+                        <v-btn value="live2d" class="px-6" style="letter-spacing: 0;">
+                          <span class="material-symbols-outlined" style="font-size: 20px; margin-right: 6px;">view_in_ar</span>
+                          Live2D
+                        </v-btn>
+                        <v-btn value="galgame" class="px-6" style="letter-spacing: 0;">
+                          <span class="material-symbols-outlined" style="font-size: 20px; margin-right: 6px;">image</span>
+                          立绘模式
+                        </v-btn>
+                      </v-btn-toggle>
+                    </v-col>
+                  </v-row>
+
+                  <!-- Live2D 模式选项 -->
+                  <v-row v-if="config.live2d.display_mode === 'live2d'">
                     <v-col cols="12" md="6">
                       <v-select
                         v-model="config.live2d.model_name"
@@ -719,7 +743,75 @@
                         </v-btn>
                       </v-btn-toggle>
                     </v-col>
-                    <v-col cols="12" v-if="mobileQR.show">
+                  </v-row>
+
+                  <!-- Galgame 模式选项 -->
+                  <v-row v-if="config.live2d.display_mode === 'galgame'">
+                    <v-col cols="12" md="6">
+                      <v-select
+                        v-model="config.live2d.character_name"
+                        :items="characters"
+                        item-title="name"
+                        item-value="name"
+                        label="角色选择"
+                        variant="outlined"
+                        density="comfortable"
+                        hide-details
+                        no-data-text="请将角色文件夹放入 characters/ 目录"
+                      ></v-select>
+                      <p class="text-caption mt-1" style="color: #6b7280;">在 characters/ 下创建角色文件夹，放入对应情绪的立绘图片。</p>
+                    </v-col>
+                    <v-col cols="12" md="6">
+                      <p class="text-caption" style="color: #6b7280; line-height: 1.8;">
+                        文件名：neutral.png, joy.png, sadness.png 等。<br>
+                        支持多差分：joy1.png, joy2.png, joy3.png... 随机展示。
+                      </p>
+                    </v-col>
+                    <v-col cols="6" md="3">
+                      <v-text-field
+                        v-model.number="config.live2d.galgame_width"
+                        label="窗口宽度"
+                        type="number"
+                        variant="outlined"
+                        density="compact"
+                        hide-details
+                        suffix="px"
+                      ></v-text-field>
+                    </v-col>
+                    <v-col cols="6" md="3">
+                      <v-text-field
+                        v-model.number="config.live2d.galgame_height"
+                        label="窗口高度"
+                        type="number"
+                        variant="outlined"
+                        density="compact"
+                        hide-details
+                        suffix="px"
+                      ></v-text-field>
+                    </v-col>
+                    <v-col cols="12">
+                      <v-btn-toggle
+                        mandatory
+                        rounded="pill"
+                        color="primary"
+                        variant="flat"
+                        style="background-color: var(--md-sys-color-background); border: 1px solid rgba(0,0,0,0.05);"
+                      >
+                        <v-btn value="desktop" class="px-6" style="letter-spacing: 0;" @click="openGalgamePage">
+                          <span class="material-symbols-outlined" style="font-size: 20px; margin-right: 6px;">computer</span>
+                          电脑端打开
+                        </v-btn>
+                        <v-btn value="mobile" class="px-6" style="letter-spacing: 0;" @click="openGalgameMobile">
+                          <span class="material-symbols-outlined" style="font-size: 20px; margin-right: 6px;">phone_android</span>
+                          手机端打开
+                        </v-btn>
+                      </v-btn-toggle>
+                    </v-col>
+                  </v-row>
+
+                  <!-- 手机二维码（两种模式共用） -->
+                  <v-row v-if="mobileQR.show">
+                    <v-col cols="12">
                       <v-card flat class="pa-4 mt-2" style="border-radius: 12px; border: 1px solid rgba(0,0,0,0.08); max-width: 400px; background: var(--md-sys-color-background);">
                         <v-select
                           v-if="mobileQR.allIPs.length > 1"
@@ -871,7 +963,11 @@
             },
             live2d: {
               model_name: '',
-              browser_audio: false
+              browser_audio: false,
+              display_mode: 'live2d',
+              character_name: '',
+              galgame_width: 700,
+              galgame_height: 900
             }
         });
 
@@ -897,6 +993,7 @@
         const wakewordModels = ref([]);
         const customWakewordModels = ref([]);
         const live2dModels = ref([]);
+        const characters = ref([]);
         const mobileQR = ref({ show: false, url: '', allIPs: [], selectedIP: '', port: 8000 });
         const samplesDialog = ref({ show: false, tab: 'positive', positive: [], negative: [] });
 
@@ -939,8 +1036,12 @@
                   config.value.wakeword.custom_name = 'shizuku';
                 }
                 if (!config.value.live2d) {
-                  config.value.live2d = { model_name: '', browser_audio: false };
+                  config.value.live2d = { model_name: '', browser_audio: false, display_mode: 'live2d', character_name: '' };
                 }
+                if (!config.value.live2d.display_mode) config.value.live2d.display_mode = 'live2d';
+                if (!config.value.live2d.character_name) config.value.live2d.character_name = '';
+                if (!config.value.live2d.galgame_width) config.value.live2d.galgame_width = 700;
+                if (!config.value.live2d.galgame_height) config.value.live2d.galgame_height = 900;
                 // Ensure providers have keys array populated
                 ['gemini', 'openai_compat', 'deepseek'].forEach(p => {
                   if (!config.value.providers) config.value.providers = {};
@@ -960,6 +1061,15 @@
               if (!res.ok) return;
               const data = await res.json();
               live2dModels.value = data.models || [];
+            } catch (e) { /* ignore */ }
+        };
+
+        const loadCharacters = async () => {
+            try {
+              const res = await fetch('/api/characters');
+              if (!res.ok) return;
+              const data = await res.json();
+              characters.value = data.characters || [];
             } catch (e) { /* ignore */ }
         };
 
@@ -1002,11 +1112,51 @@
 
         const onMobileIPChange = async (newIP) => {
             const port = mobileQR.value.port;
-            const url = `http://${newIP}:${port}/live2d`;
+            const mode = config.value.live2d.display_mode || 'live2d';
+            const path = mode === 'galgame' ? '/galgame' : '/live2d';
+            const charParam = mode === 'galgame' && config.value.live2d.character_name
+              ? `?character=${config.value.live2d.character_name}` : '';
+            const url = `http://${newIP}:${port}${path}${charParam}`;
             mobileQR.value.url = url;
             mobileQR.value.selectedIP = newIP;
             await Vue.nextTick();
             renderQR(url);
+        };
+
+        const openGalgamePage = async () => {
+            const charName = config.value.live2d.character_name || '';
+            try {
+              await fetch('/api/galgame/open', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ character: charName })
+              });
+            } catch (e) {
+              // fallback: 浏览器打开
+              const url = charName ? `/galgame?character=${charName}` : '/galgame';
+              window.open(url, '_blank');
+            }
+        };
+
+        const openGalgameMobile = async () => {
+            try {
+                const res = await fetch('/api/network/info');
+                const data = await res.json();
+                const port = data.port;
+                const allIPs = (data.all_ips || []).map(item => ({
+                    ip: item.ip,
+                    label: `${item.ip}  (${item.adapter || item.ip})`
+                }));
+                const selectedIP = data.ip;
+                const charName = config.value.live2d.character_name || '';
+                const charParam = charName ? `?character=${charName}` : '';
+                const url = `http://${selectedIP}:${port}/galgame${charParam}`;
+                mobileQR.value = { show: true, url, allIPs, selectedIP, port };
+                await Vue.nextTick();
+                renderQR(url);
+            } catch (e) {
+                snackbar.value = { show: true, text: '获取网络信息失败' };
+            }
         };
 
         const loadWakewordModels = async () => {
@@ -1259,6 +1409,7 @@
           refreshWakewordStats();
           refreshWakewordTrainingStatus();
           loadLive2DModels();
+          loadCharacters();
           // Attach change listener to wakeword screenshot checkbox to sync state immediately
           setTimeout(() => {
             const cb = document.getElementById('wakeword-screenshot-cb');
@@ -1301,9 +1452,12 @@
           stopWakewordSample,
           trainWakeword,
           live2dModels,
+          characters,
           openLive2DPage,
+          openGalgamePage,
           mobileQR,
           openLive2DMobile,
+          openGalgameMobile,
           onMobileIPChange
         };
       }

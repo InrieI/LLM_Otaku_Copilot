@@ -131,9 +131,10 @@
     let activeMouthParam = null;
     let lipSyncRafId = null;
     let activeSource = null;      // current AudioBufferSourceNode, for interrupting
-    let activeAnalyser = null;
     let activeSafetyTimeout = null;
     let emotionBadgeTimeout = null;
+    let audioGeneration = 0;      // 防止新旧音频交错的计数器
+    let isAudioPlaying = false;   // audio source has started — lip sync active
 
     const subtitleEl = document.getElementById('subtitle');
     const emotionEl  = document.getElementById('emotion-badge');
@@ -305,16 +306,31 @@
 
       try {
         const core = currentModel.internalModel.coreModel;
+        // Log all parameter IDs for debugging
+        try {
+          const paramCount = core.getParameterCount();
+          const mouthRelated = [];
+          for (let i = 0; i < paramCount; i++) {
+            const id = core.getParameterId(i);
+            if (id && id.toLowerCase().includes('mouth')) {
+              mouthRelated.push(`${id}=${core.getParameterValue(i)}`);
+            }
+          }
+          console.log('[detectMouth] mouth-related params:', mouthRelated.join(', ') || '(none)');
+        } catch (e) { console.log('[detectMouth] could not enumerate params:', e.message); }
+
         for (const p of MOUTH_PARAMS) {
           try {
             core.setParameterValueById(p, 0);
             activeMouthParam = p;
+            console.log('[detectMouth] using:', p);
             return p;
           } catch (e) {}
         }
       } catch (e) {}
 
       activeMouthParam = MOUTH_PARAMS[0];
+      console.log('[detectMouth] fallback to:', activeMouthParam);
       return activeMouthParam;
     }
 
@@ -337,9 +353,13 @@
       if (isSpeaking) {
         stopSpeaking();
       }
+
+      // 递增 generation，如果 decode 期间有新的音频请求，旧的会自动放弃
+      const myGen = ++audioGeneration;
       isSpeaking = true;
+      isAudioPlaying = false;   // will be set to true once source.start()
       mouthValue = 0;
-      statusEl.textContent = 'speaking';
+      statusEl.textContent = 'loading audio...';
       statusEl.className = 'speaking';
 
       try {
@@ -360,22 +380,20 @@
         const arrayBuffer = await response.arrayBuffer();
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
-        // If speaking was stopped while we were decoding, abort
-        if (!isSpeaking) return;
+        // 如果在 decode 期间有新的音频请求，放弃这次播放
+        if (audioGeneration !== myGen) return;
 
-        // Create per-playback analyser
-        const analyser = audioContext.createAnalyser();
-        analyser.fftSize = 256;
-        analyser.smoothingTimeConstant = 0.5;
+        // 直接从 AudioBuffer 的 PCM 样本计算振幅，不依赖 AnalyserNode
+        const pcmData = audioBuffer.getChannelData(0); // float32 [-1, 1]
+        const sampleRate = audioBuffer.sampleRate;
+        const windowSize = Math.floor(sampleRate * 0.03); // 30ms 窗口
 
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
-        source.connect(analyser);
-        analyser.connect(gainNode);
+        source.connect(gainNode);
 
         // Track active nodes so stopSpeaking() can interrupt them
         activeSource = source;
-        activeAnalyser = analyser;
 
         // Cancel previous lip sync loop
         if (lipSyncRafId !== null) {
@@ -383,51 +401,75 @@
           lipSyncRafId = null;
         }
 
+        const startTime = audioContext.currentTime;
         source.start(0);
+        isAudioPlaying = true;
+        statusEl.textContent = 'speaking';
+        console.log('[lip-sync] source started, duration:', audioBuffer.duration.toFixed(2), 's, samples:', pcmData.length);
 
-        // Safety timeout (audio duration + 2s buffer for network/decode delay)
+        // Safety timeout
         activeSafetyTimeout = setTimeout(() => {
-          stopSpeaking();
+          if (audioGeneration === myGen) stopSpeaking();
         }, Math.max(2000, audioBuffer.duration * 1000 + 2000));
 
-        // Lip sync rAF loop: reads audio amplitude → writes mouthValue
-        const dataArray = new Uint8Array(analyser.fftSize);
+        // Lip sync rAF loop: 直接读 PCM 样本
         let smoothed = 0;
+        let _dbgFrameCount = 0;
 
         function updateMouth() {
-          if (!isSpeaking) { lipSyncRafId = null; return; }
+          if (!isSpeaking || audioGeneration !== myGen) { lipSyncRafId = null; return; }
 
-          analyser.getByteTimeDomainData(dataArray);
+          // 根据当前播放时间计算样本位置
+          const elapsed = audioContext.currentTime - startTime;
+          const samplePos = Math.floor(elapsed * sampleRate);
+          const halfWin = Math.floor(windowSize / 2);
+          const start = Math.max(0, samplePos - halfWin);
+          const end = Math.min(pcmData.length, samplePos + halfWin);
+
+          // 计算窗口内 RMS
           let sumSq = 0;
-          for (let i = 0; i < dataArray.length; i++) {
-            const v = (dataArray[i] - 128) / 128;
+          let count = 0;
+          let minS = 1, maxS = -1;
+          for (let i = start; i < end; i++) {
+            const v = pcmData[i];
+            if (v < minS) minS = v;
+            if (v > maxS) maxS = v;
             sumSq += v * v;
+            count++;
           }
-          const raw = Math.sqrt(sumSq / dataArray.length);
-          smoothed += (raw - smoothed) * 0.4;
-          mouthValue = Math.min(1, smoothed * 8.0);
+          const raw = count > 0 ? Math.sqrt(sumSq / count) : 0;
+          // 上升快（0.4）、下降快（0.6）—— 嘴巴张开迅速，闭合也迅速
+          const alpha = raw > smoothed ? 0.4 : 0.6;
+          smoothed += (raw - smoothed) * alpha;
+          // 非线性映射：用 pow 压缩峰值，限制在 0.05 ~ 0.55 范围
+          const normalized = Math.min(1, smoothed * 3.0);
+          mouthValue = 0.05 + Math.pow(normalized, 0.7) * 0.50;
+
+          if (_dbgFrameCount < 10 || _dbgFrameCount % 60 === 0) {
+            console.log(`[lip-sync] frame=${_dbgFrameCount} pos=${samplePos}/${pcmData.length} min=${minS.toFixed(3)} max=${maxS.toFixed(3)} raw=${raw.toFixed(4)} smoothed=${smoothed.toFixed(4)} mouth=${mouthValue.toFixed(3)}`);
+          }
+          _dbgFrameCount++;
 
           lipSyncRafId = requestAnimationFrame(updateMouth);
         }
         lipSyncRafId = requestAnimationFrame(updateMouth);
 
         source.onended = () => {
-          // Only clean up if this is still the active source (not already interrupted)
-          if (activeSource === source) {
+          if (audioGeneration === myGen) {
             if (activeSafetyTimeout) clearTimeout(activeSafetyTimeout);
             stopSpeaking();
           }
           source.disconnect();
-          analyser.disconnect();
         };
       } catch (err) {
         console.error('[live2d] Audio error:', err);
-        stopSpeaking();
+        if (audioGeneration === myGen) stopSpeaking();
       }
     }
 
     function stopSpeaking() {
       isSpeaking = false;
+      isAudioPlaying = false;
       mouthValue = 0;
       if (lipSyncRafId !== null) {
         cancelAnimationFrame(lipSyncRafId);
@@ -443,10 +485,7 @@
         try { activeSource.disconnect(); } catch (e) {}
         activeSource = null;
       }
-      if (activeAnalyser) {
-        try { activeAnalyser.disconnect(); } catch (e) {}
-        activeAnalyser = null;
-      }
+      // mouthValue = 0 已在上面设置，下一帧 beforeModelUpdate 事件会自动应用到模型
       statusEl.textContent = 'connected';
       statusEl.className = 'connected';
       // Hide subtitle after speaking ends (with a short delay so user can read it)
@@ -457,54 +496,219 @@
     // ============================================================
     //  6. Per-frame state updater (presets + emotion + lip sync)
     // ============================================================
-    function registerStateUpdater(model) {
-      if (!model) return;
+    let _coreErrorCount = 0;
+    let _dbgTickerCount = 0;
 
-      // Hook into model.update: runs after motion manager, before vertex computation.
-      const origUpdate = model.update.bind(model);
-      model.update = function (delta) {
-        origUpdate(delta);
-
-        if (!currentModel) return;
-        const core = currentModel.internalModel.coreModel;
-
-        // 1. Presets (cat ears, hair)
-        if (modelConfig && modelConfig.presets) {
-          for (const [pId, pVal] of Object.entries(modelConfig.presets)) {
-            try { core.setParameterValueById(pId, pVal); } catch (e) {}
+    function _applyOverrides(core) {
+      // 1. Presets (cat ears, hair)
+      if (modelConfig && modelConfig.presets) {
+        for (const [pId, pVal] of Object.entries(modelConfig.presets)) {
+          try { core.setParameterValueById(pId, pVal); } catch (e) {
+            _coreErrorCount++;
           }
         }
+      }
 
-        // 2. Emotion params
+      // 2. Emotion params — only override for non-neutral emotions
+      if (currentEmotion && currentEmotion !== 'neutral') {
         const emoParams = getEmotionParams(currentEmotion);
         for (const pId of ALL_EMOTION_PARAM_IDS) {
           if (modelConfig && modelConfig.presets && pId in modelConfig.presets) continue;
           const val = emoParams[pId] || 0;
-          try { core.setParameterValueById(pId, val); } catch (e) {}
-        }
-
-        // 3. Part opacities
-        if (modelConfig && modelConfig.presetParts) {
-          for (const [partId, opacity] of Object.entries(modelConfig.presetParts)) {
-            try {
-              const idx = core.getPartIndex(partId);
-              if (idx >= 0) core.setPartOpacityByIndex(idx, opacity);
-            } catch (e) {}
+          try { core.setParameterValueById(pId, val); } catch (e) {
+            _coreErrorCount++;
           }
         }
-      };
+      }
 
-      // Lip sync in a separate LOW_PRIORITY ticker that runs AFTER model.update
-      // and AFTER the Cubism core's physics/pose/expression pipeline completes.
-      // This ensures the mouth value isn't overwritten by downstream processing.
-      pixiApp.ticker.add(() => {
-        if (!isSpeaking || !activeMouthParam || !currentModel) return;
+      // 3. Part opacities
+      if (modelConfig && modelConfig.presetParts) {
+        for (const [partId, opacity] of Object.entries(modelConfig.presetParts)) {
+          try {
+            const idx = core.getPartIndex(partId);
+            if (idx >= 0) core.setPartOpacityByIndex(idx, opacity);
+          } catch (e) {
+            _coreErrorCount++;
+          }
+        }
+      }
+
+      // 4. Lip sync (mouth)
+      if (isAudioPlaying && activeMouthParam) {
+        const effectiveMouth = window.debugMouthTest
+          ? (Math.sin(Date.now() / 100) * 0.5 + 0.5)
+          : mouthValue;
         try {
-          const core = currentModel.internalModel.coreModel;
-          core.setParameterValueById(activeMouthParam, mouthValue);
+          core.setParameterValueById(activeMouthParam, effectiveMouth);
+          if (_dbgTickerCount < 5 || _dbgTickerCount % 120 === 0) {
+            console.log(`[override] ${activeMouthParam}=${effectiveMouth.toFixed(3)} emo=${currentEmotion} speaking=${isAudioPlaying}`);
+          }
+          _dbgTickerCount++;
+        } catch (e) {
+          _coreErrorCount++;
+        }
+      }
+
+      // Debug: 测试眼睛
+      if (window.debugMouthTest) {
+        try {
+          const eyeVal = Math.sin(Date.now() / 200) * 0.5 + 0.5;
+          core.setParameterValueById('ParamEyeLOpen', eyeVal);
+          core.setParameterValueById('ParamEyeROpen', eyeVal);
         } catch (e) {}
-      }, null, PIXI.UPDATE_PRIORITY.LOW);
+      }
+
+      if (_coreErrorCount > 300) {
+        _coreErrorCount = 0;
+        activeMouthParam = null;
+        detectMouthParam();
+      }
     }
+
+    function registerStateUpdater(model) {
+      if (!model) return;
+
+      const core = model.internalModel.coreModel;
+      const internalModel = model.internalModel;
+
+      // ── Listen for beforeModelUpdate event ──
+      // This fires RIGHT BEFORE model.update() computes vertices,
+      // after motion/expressions/physics have set their params.
+      // Our overrides will be included in the vertex computation.
+      let _frameCount = 0;
+      internalModel.on('beforeModelUpdate', () => {
+        _applyOverrides(core);
+        _frameCount++;
+        if (_frameCount <= 5 || _frameCount % 300 === 0) {
+          const mouthIdx = core.getParameterIndex('ParamMouthOpenY');
+          console.log(`[beforeModelUpdate #${_frameCount}] mouth=${core.getParameterValueByIndex(mouthIdx).toFixed(3)} isAudio=${isAudioPlaying} mouthVal=${mouthValue.toFixed(3)}`);
+        }
+      });
+
+      // 列出 coreModel 所有方法
+      const methods = [];
+      let obj = core;
+      while (obj && obj !== Object.prototype) {
+        for (const key of Object.getOwnPropertyNames(obj)) {
+          if (typeof core[key] === 'function') methods.push(key);
+        }
+        obj = Object.getPrototypeOf(obj);
+      }
+      console.log('[registerStateUpdater] coreModel methods:', methods.sort().join(', '));
+      console.log('[registerStateUpdater] patched core.update and internalModel.draw');
+
+      // Expose core reference for console debugging
+      window._live2dCore = core;
+      window._live2dInternalModel = internalModel;
+    }
+
+    // Global vertex test — call testVertex() from browser console
+    window.testVertex = function() {
+      const core = window._live2dCore;
+      if (!core) { console.error('No core loaded yet'); return; }
+
+      console.log('=== testVertex START ===');
+
+      // 1. Read current mouth param
+      const mouthIdx = core.getParameterIndex('ParamMouthOpenY');
+      console.log('ParamMouthOpenY index:', mouthIdx);
+      console.log('ParamMouthOpenY value BEFORE:', core.getParameterValueByIndex(mouthIdx));
+
+      // 2. Read some vertex positions BEFORE
+      const numDrawables = core.getDrawableCount();
+      console.log('Drawable count:', numDrawables);
+
+      // Find drawables that have mouth-related vertices
+      // Just sample first few drawables
+      const sampleCount = Math.min(numDrawables, 5);
+      const vertsBefore = [];
+      for (let i = 0; i < sampleCount; i++) {
+        const verts = core.getDrawableVertexPositions(i);
+        vertsBefore.push(verts.slice(0, 10)); // first 10 values (5 vertices)
+      }
+      console.log('Verts BEFORE (first 5 drawables, first 5 verts each):', vertsBefore);
+
+      // 3. Set mouth to max
+      core.setParameterValueById('ParamMouthOpenY', 1.0);
+      console.log('Set ParamMouthOpenY to 1.0, readback:', core.getParameterValueByIndex(mouthIdx));
+
+      // 4. Also try by index
+      core.setParameterValueByIndex(mouthIdx, 1.0);
+      console.log('Also set by index, readback:', core.getParameterValueByIndex(mouthIdx));
+
+      // 5. Call update
+      try {
+        core.update();
+        console.log('core.update() called OK');
+      } catch (e) {
+        console.error('core.update() error:', e);
+      }
+
+      // 6. Read vertices AFTER
+      const vertsAfter = [];
+      for (let i = 0; i < sampleCount; i++) {
+        const verts = core.getDrawableVertexPositions(i);
+        vertsAfter.push(verts.slice(0, 10));
+      }
+      console.log('Verts AFTER (first 5 drawables, first 5 verts each):', vertsAfter);
+
+      // 7. Compare
+      let anyChanged = false;
+      for (let i = 0; i < sampleCount; i++) {
+        for (let j = 0; j < vertsBefore[i].length; j++) {
+          if (Math.abs(vertsBefore[i][j] - vertsAfter[i][j]) > 0.0001) {
+            anyChanged = true;
+            console.log(`  CHANGED: drawable[${i}] vert[${j}]: ${vertsBefore[i][j]} -> ${vertsAfter[i][j]}`);
+          }
+        }
+      }
+      if (!anyChanged) {
+        console.warn('!!! NO VERTEX CHANGED after setParamValueById + update() !!!');
+        console.log('Trying saveParameters/loadParameters approach...');
+
+        // Try save/load approach
+        core.saveParameters();
+        core.setParameterValueById('ParamMouthOpenY', 1.0);
+        core.update();
+        const vertsAfter2 = [];
+        for (let i = 0; i < sampleCount; i++) {
+          vertsAfter2.push(core.getDrawableVertexPositions(i).slice(0, 10));
+        }
+        let changed2 = false;
+        for (let i = 0; i < sampleCount; i++) {
+          for (let j = 0; j < vertsBefore[i].length; j++) {
+            if (Math.abs(vertsBefore[i][j] - vertsAfter2[i][j]) > 0.0001) {
+              changed2 = true;
+              console.log(`  save/load CHANGED: drawable[${i}] vert[${j}]: ${vertsBefore[i][j]} -> ${vertsAfter2[i][j]}`);
+            }
+          }
+        }
+        if (!changed2) console.warn('!!! save/load ALSO produced no vertex changes !!!');
+      } else {
+        console.log('SUCCESS: vertices DID change!');
+      }
+
+      // 8. Reset mouth
+      core.setParameterValueById('ParamMouthOpenY', 0);
+      core.setParameterValueByIndex(mouthIdx, 0);
+      core.update();
+      console.log('=== testVertex END ===');
+    };
+
+    // Quick check: list all parameter IDs and their current values
+    window.listParams = function() {
+      const core = window._live2dCore;
+      if (!core) { console.error('No core loaded yet'); return; }
+      const count = core.getParameterCount();
+      console.log(`Parameters (${count}):`);
+      for (let i = 0; i < count; i++) {
+        const id = core.getParameterId(i);
+        const val = core.getParameterValueByIndex(i);
+        const min = core.getParameterMinimumValue(i);
+        const max = core.getParameterMaximumValue(i);
+        console.log(`  [${i}] ${id} = ${val.toFixed(3)} (range: ${min}~${max})`);
+      }
+    };
 
     // ============================================================
     //  7. Emotion + subtitle
@@ -587,6 +791,21 @@
         statusEl.textContent = 'error';
         console.error('[live2d] Boot error:', err);
       }
+
+      // Initialize volume from backend TTS config
+      try {
+        const cfgRes = await fetch('/api/config');
+        if (cfgRes.ok) {
+          const cfg = await cfgRes.json();
+          const vol = cfg.tts?.volume;
+          if (vol !== undefined && vol !== null) {
+            currentVolume = parseFloat(vol);
+            if (gainNode) gainNode.gain.value = currentVolume;
+            document.getElementById('volume-slider').value = currentVolume;
+            document.getElementById('volume-val').textContent = Math.round(currentVolume * 100) + '%';
+          }
+        }
+      } catch (e) {}
 
       // Initialize lastAudioVersion from backend to prevent replaying old audio on refresh
       try {
